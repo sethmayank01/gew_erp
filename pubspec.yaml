@@ -1,0 +1,43 @@
+name: gew_erp
+description: A Flutter app for generating test reports.
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  dropdown_search: ^5.0.6
+  uuid: ^4.0.0
+  path: ^1.8.0
+  sqflite_common_ffi: ^2.3.0
+  sqflite: ^2.3.0
+  cupertino_icons: ^1.0.8
+  go_router: ^15.1.2
+  pdf: ^3.10.4
+  printing: ^5.12.0
+  http: ^1.2.1
+  file_picker: 10.1.9
+  path_provider: ^2.1.2
+  shared_preferences: ^2.2.2
+  permission_handler: ^12.0.0+1
+  intl: ^0.20.2
+  bcrypt: 1.1.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_launcher_icons: ^0.14.3
+
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/logo.png"
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/logo.png
+    - fonts/Roboto-Regular.ttf
