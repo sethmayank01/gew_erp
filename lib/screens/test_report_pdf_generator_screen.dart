@@ -57,9 +57,9 @@ class _TestReportPdfGeneratorScreenState
   Future<void> _loadJobs() async {
     final jobs = await ApiService.getJobs();
     setState(() {
-      _jobs = List<Map<String, dynamic>>.from(jobs)
-          .where((job) => job['isFinal'] != true)
-          .toList();
+      _jobs = List<Map<String, dynamic>>.from(
+        jobs,
+      ).where((job) => job['isFinal'] != true).toList();
     });
   }
 
@@ -67,7 +67,7 @@ class _TestReportPdfGeneratorScreenState
     _purchaserNameController.text = data['purchaserName'] ?? '';
     _purchaserRefController.text = data['purchaserReference'] ?? '';
     _serialNoController.text = data['serialNo'] ?? '';
-    _dateOfTestingController.text = data['dateOfTesting'] ?? '';
+    // Do NOT prefill dateOfTesting, as per requirement.
     _kvaController.text = data['kva'] ?? '';
     _phasesController.text = data['phases'] ?? '';
     _hvVoltageController.text = data['hvVoltage'] ?? '';
@@ -83,6 +83,9 @@ class _TestReportPdfGeneratorScreenState
   }
 
   void _submitForm() {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
     int tapCount = 1;
     double maxTap = 0.0;
     double minTap = 0.0;
@@ -97,7 +100,8 @@ class _TestReportPdfGeneratorScreenState
 
       if (result % 1 != 0) {
         _showError(
-            'Invalid tap settings: (Max - Min) / Step must be a whole number.');
+          'Invalid tap settings: (Max - Min) / Step must be a whole number.',
+        );
         return;
       }
 
@@ -119,18 +123,23 @@ class _TestReportPdfGeneratorScreenState
       'lvVoltage': _lvVoltageController.text,
     };
 
-    context.push('/second-input', extra: {
-      'generalData': data,
-      'tapCount': tapCount,
-      'isEdit': widget.isEdit,
-      'testData': widget.generalData?['testData'],
-    });
+    context.push(
+      '/second-input',
+      extra: {
+        'generalData': data,
+        'tapCount': tapCount,
+        'isEdit': widget.isEdit,
+        'testData': widget.generalData?['testData'],
+      },
+    );
   }
 
   void _onJobSelected(String? jobNo) {
     setState(() => _selectedJobNo = jobNo);
-    final selectedJob =
-        _jobs.firstWhere((job) => job['serialNo'] == jobNo, orElse: () => {});
+    final selectedJob = _jobs.firstWhere(
+      (job) => job['serialNo'] == jobNo,
+      orElse: () => {},
+    );
     if (selectedJob.isNotEmpty) {
       _prefillFromData(selectedJob);
     }
@@ -193,19 +202,23 @@ class _TestReportPdfGeneratorScreenState
                     _buildField(_purchaserRefController, 'Purchaser Reference'),
                     _buildField(_serialNoController, 'Serial No'),
                     _buildDateField(
-                        _dateOfTestingController, 'Date of Testing'),
+                      _dateOfTestingController,
+                      'Date of Testing',
+                    ),
                     _buildField(_kvaController, 'KVA'),
                     _buildField(_phasesController, 'Phases'),
                     _buildDropdownField(
-                        'Vector Group',
-                        _vectorGroupOptions,
-                        _selectedVectorGroup,
-                        (val) => setState(() => _selectedVectorGroup = val)),
+                      'Vector Group',
+                      _vectorGroupOptions,
+                      _selectedVectorGroup,
+                      (val) => setState(() => _selectedVectorGroup = val),
+                    ),
                     _buildDropdownField(
-                        'Relevant IS',
-                        _relevantISOptions,
-                        _selectedRelevantIS,
-                        (val) => setState(() => _selectedRelevantIS = val)),
+                      'Relevant IS',
+                      _relevantISOptions,
+                      _selectedRelevantIS,
+                      (val) => setState(() => _selectedRelevantIS = val),
+                    ),
                     _buildField(_hvVoltageController, 'HV Voltage'),
                     _buildField(_lvVoltageController, 'LV Voltage'),
                     _buildField(_tapMaxController, 'Tapping Max'),
@@ -217,7 +230,7 @@ class _TestReportPdfGeneratorScreenState
                 ElevatedButton(
                   onPressed: _submitForm,
                   child: const Text('Next'),
-                )
+                ),
               ],
             ),
           ),
@@ -236,8 +249,10 @@ class _TestReportPdfGeneratorScreenState
           labelText: label,
           isDense: true,
           border: const OutlineInputBorder(),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 10,
+          ),
         ),
         validator: (value) =>
             value == null || value.isEmpty ? 'Required' : null,
@@ -256,26 +271,35 @@ class _TestReportPdfGeneratorScreenState
           labelText: label,
           isDense: true,
           border: const OutlineInputBorder(),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 10,
+          ),
           suffixIcon: const Icon(Icons.calendar_today, size: 18),
         ),
-        validator: (value) =>
-            value == null || value.isEmpty ? 'Required' : null,
+        validator: (value) => value == null || value.isEmpty
+            ? 'Date of Testing is required'
+            : null,
       ),
     );
   }
 
-  Widget _buildDropdownField(String label, List<String> items,
-      String? selectedValue, ValueChanged<String?> onChanged) {
+  Widget _buildDropdownField(
+    String label,
+    List<String> items,
+    String? selectedValue,
+    ValueChanged<String?> onChanged,
+  ) {
     return SizedBox(
       width: MediaQuery.of(context).size.width / 2 - 24,
       child: InputDecorator(
         decoration: InputDecoration(
           labelText: label,
           isDense: true,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 10,
+          ),
           border: const OutlineInputBorder(),
         ),
         child: DropdownButtonHideUnderline(

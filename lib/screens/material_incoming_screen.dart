@@ -32,12 +32,32 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
   String _role = '';
   String _username = '';
 
+  // Search feature for entries
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
   @override
   void initState() {
     super.initState();
     _loadData();
     _loadEntries();
     _loadUser();
+    _searchController.addListener(() {
+      setState(() {
+        _searchQuery = _searchController.text.trim().toLowerCase();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _qtyController.dispose();
+    _priceController.dispose();
+    _makeController.dispose();
+    _descController.dispose();
+    _invoiceController.dispose();
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadUser() async {
@@ -53,17 +73,19 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
     final jobs = await ApiService.getOpenJobs();
     setState(() {
       _materialsRaw = List<Map<String, dynamic>>.from(materials);
-      _materials = materials
-          .map<String>((m) =>
-              "${m['type']} - ${m['subtype']}${m['make'] != null && m['make'].toString().trim().isNotEmpty ? ' - ${m['make']}' : ''}")
-          .toSet()
-          .toList()
-        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      _materials =
+          materials
+              .map<String>(
+                (m) =>
+                    "${m['type']} - ${m['subtype']}${m['make'] != null && m['make'].toString().trim().isNotEmpty ? ' - ${m['make']}' : ''}",
+              )
+              .toSet()
+              .toList()
+            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
 
-      _jobNumbers = jobs
-          .map<String>((job) => job['serialNo'].toString())
-          .toList()
-        ..sort();
+      _jobNumbers =
+          jobs.map<String>((job) => job['serialNo'].toString()).toList()
+            ..sort();
     });
   }
 
@@ -119,7 +141,7 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
     };
 
     await ApiService.submitMaterialIncoming(data);
-    await ApiService.addStock(data: data); // <-- Add this line
+    await ApiService.addStock(data: data);
     await _loadEntries();
     ScaffoldMessenger.of(
       context,
@@ -134,17 +156,10 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
   Future<void> _deleteEntry(String id, String user) async {
     if (_role == "admin" || user == _username) {
       try {
-        // 1. Fetch the material entry details before deleting
         final entry = await ApiService.getMaterialEntryById(id);
-
         if (entry != null) {
-          // 2. Reduce stock using this entry
           await ApiService.removeStock(data: entry);
-
-          // 3. Delete the entry
           await ApiService.deleteMaterialEntry(id);
-
-          // 4. Reload entries
           await _loadEntries();
         }
       } catch (e) {
@@ -155,6 +170,18 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Filter entries based on search
+    final filteredEntries = _entries.where((entry) {
+      final search = _searchQuery;
+      if (search.isEmpty) return true;
+      return (entry['material'] ?? '').toString().toLowerCase().contains(
+            search,
+          ) ||
+          (entry['serialNo'] ?? '').toString().toLowerCase().contains(search) ||
+          (entry['user'] ?? '').toString().toLowerCase().contains(search) ||
+          (entry['invoice'] ?? '').toString().toLowerCase().contains(search);
+    }).toList();
+
     return Scaffold(
       appBar: AppBar(title: const Text('Material Incoming')),
       body: Padding(
@@ -198,11 +225,11 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                             items: _jobNumbers..sort(),
                             dropdownDecoratorProps:
                                 const DropDownDecoratorProps(
-                              dropdownSearchDecoration: InputDecoration(
-                                labelText: "Job Number",
-                                border: OutlineInputBorder(),
-                              ),
-                            ),
+                                  dropdownSearchDecoration: InputDecoration(
+                                    labelText: "Job Number",
+                                    border: OutlineInputBorder(),
+                                  ),
+                                ),
                             popupProps: const PopupProps.menu(
                               showSearchBox: true,
                               searchFieldProps: TextFieldProps(
@@ -309,7 +336,18 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
             const Divider(height: 30),
             const Text('Incoming Entries', style: TextStyle(fontSize: 18)),
             const SizedBox(height: 8),
-            ..._entries.map(
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8.0),
+              child: TextField(
+                controller: _searchController,
+                decoration: const InputDecoration(
+                  labelText: 'Search incoming entries',
+                  prefixIcon: Icon(Icons.search),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ),
+            ...filteredEntries.map(
               (entry) => Card(
                 child: ListTile(
                   title: Text(entry['material'] ?? ''),

@@ -37,54 +37,62 @@ class TestReportPdfGenerator {
     final double temperature =
         double.tryParse(data['testData']['temperature']?.toString() ?? '') ?? 0;
 
+    // Defensive: fallback if step is 0 (avoid division by zero)
+    final int tapCount = (step == 0)
+        ? 1
+        : (((tapMax - tapMin) / step).round() + 1);
+
     final List<double> tapSteps = List.generate(
-      (((tapMax - tapMin) / step).round() + 1),
+      tapCount,
       (i) => (tapMax - (i * step)),
     );
-    final List<int> tapStepsSno = List.generate(
-      (((tapMax - tapMin) / step).round() + 1),
-      (i) => (i + 1),
-    );
+    final List<int> tapStepsSno = List.generate(tapCount, (i) => (i + 1));
 
-    final List ratioData = data['testData']['ratios'];
+    final List ratioData = (data['testData']?['ratios'] as List?) ?? [];
     final Map<String, double> hvResistance = _calcResistanceHV(
-      data['testData']['windingResistance']['hv'],
+      (data['testData']?['windingResistance']?['hv'] as Map?) ?? {},
       temperature,
       kva,
       hv,
     );
     final Map<String, double> lvResistance = _calcResistanceLV(
-      data['testData']['windingResistance']['lv'],
+      (data['testData']?['windingResistance']?['lv'] as Map?) ?? {},
       temperature,
       kva,
       lv,
     );
 
-    final noLoad = data['testData']['noLoadTest'];
-    final loadTest = data['testData']['loadTest'];
-    final rmsVoltages = _calculateRMSVoltages(noLoad);
-    final totalNoLoadLoss = _calculateTotalWatt(noLoad);
+    final noLoad = (data['testData']?['noLoadTest']) ?? {};
+    final loadTest = (data['testData']?['loadTest']) ?? {};
+
+    final rmsVoltages = _calculateRMSVoltages(
+      (noLoad ?? <String, dynamic>{}).cast<String, dynamic>(),
+    );
+    final totalNoLoadLoss = _calculateTotalWatt(
+      (noLoad ?? <String, dynamic>{}).cast<String, dynamic>(),
+    );
 
     final Map<String, double> loadAmps = {
-      'U': double.tryParse(loadTest['U']['amp'].toString()) ?? 0,
-      'V': double.tryParse(loadTest['V']['amp'].toString()) ?? 0,
-      'W': double.tryParse(loadTest['W']['amp'].toString()) ?? 0,
+      'U': double.tryParse(loadTest['U']?['amp']?.toString() ?? '') ?? 0,
+      'V': double.tryParse(loadTest['V']?['amp']?.toString() ?? '') ?? 0,
+      'W': double.tryParse(loadTest['W']?['amp']?.toString() ?? '') ?? 0,
     };
     final Map<String, double> loadVolts = {
-      'U': double.tryParse(loadTest['U']['volt'].toString()) ?? 0,
-      'V': double.tryParse(loadTest['V']['volt'].toString()) ?? 0,
-      'W': double.tryParse(loadTest['W']['volt'].toString()) ?? 0,
+      'U': double.tryParse(loadTest['U']?['volt']?.toString() ?? '') ?? 0,
+      'V': double.tryParse(loadTest['V']?['volt']?.toString() ?? '') ?? 0,
+      'W': double.tryParse(loadTest['W']?['volt']?.toString() ?? '') ?? 0,
     };
     final Map<String, double> loadWatts = {
-      'U': double.tryParse(loadTest['U']['watt'].toString()) ?? 0,
-      'V': double.tryParse(loadTest['V']['watt'].toString()) ?? 0,
-      'W': double.tryParse(loadTest['W']['watt'].toString()) ?? 0,
+      'U': double.tryParse(loadTest['U']?['watt']?.toString() ?? '') ?? 0,
+      'V': double.tryParse(loadTest['V']?['watt']?.toString() ?? '') ?? 0,
+      'W': double.tryParse(loadTest['W']?['watt']?.toString() ?? '') ?? 0,
     };
 
     final avgAmp = (loadAmps['U']! + loadAmps['V']! + loadAmps['W']!) / 3;
     final totalLoadLoss = loadWatts.values.reduce((a, b) => a + b);
-    final correctedLoadLoss = (hvResistance['current']! / avgAmp) *
-        (hvResistance['current']! / avgAmp) *
+    final correctedLoadLoss =
+        (hvResistance['current']! / (avgAmp == 0 ? 1 : avgAmp)) *
+        (hvResistance['current']! / (avgAmp == 0 ? 1 : avgAmp)) *
         totalLoadLoss;
     final i2rLoss75 = hvResistance['loss']! + lvResistance['loss']!;
     final tempFactor = (235 + temperature) / (235 + 75);
@@ -101,7 +109,7 @@ class TestReportPdfGenerator {
     final r75 = (loadLoss75 / 1000) / kva * 100;
     final z75 = sqrt(pow(xAmb, 2) + pow(r75, 2));
 
-    final vectorGroup = data['vectorGroup'].toString().toLowerCase();
+    final vectorGroup = (data['vectorGroup']?.toString() ?? '').toLowerCase();
     //  final vectorImage = await imageFromAssetBundle('assets/$vectorGroup.png');
     //final vectorImage = await imageFromAssetBundle('assets/dyn11.png');
     /* Mayank to be removed final baseTextStyle = pw.TextStyle(fontSize: 10);
@@ -135,9 +143,10 @@ class TestReportPdfGenerator {
         child: pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            pw.Text(title,
-                style:
-                    pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+            pw.Text(
+              title,
+              style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
+            ),
             pw.SizedBox(height: 4),
             content,
           ],
@@ -146,123 +155,158 @@ class TestReportPdfGenerator {
     }
 
     pw.Widget section(String title, pw.Widget content) => pw.Container(
-          margin: const pw.EdgeInsets.symmetric(vertical: 8),
-          padding: const pw.EdgeInsets.all(8),
-          decoration: pw.BoxDecoration(
-            border: pw.Border.all(color: PdfColors.grey600, width: 0.8),
-          ),
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text(title, style: boldStyle.copyWith(fontSize: 10)),
-              pw.SizedBox(height: 4),
-              content,
-            ],
-          ),
-        );
-    pw.Widget header(pw.Context context) => pw.Column(children: [
-          pw.Row(children: [
-            pw.Container(
-              width: 60,
-              height: 60,
-              child: pw.Image(logoImage),
-            ),
+      margin: const pw.EdgeInsets.symmetric(vertical: 8),
+      padding: const pw.EdgeInsets.all(8),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: PdfColors.grey600, width: 0.8),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(title, style: boldStyle.copyWith(fontSize: 10)),
+          pw.SizedBox(height: 4),
+          content,
+        ],
+      ),
+    );
+    pw.Widget header(pw.Context context) => pw.Column(
+      children: [
+        pw.Row(
+          children: [
+            pw.Container(width: 60, height: 60, child: pw.Image(logoImage)),
             pw.SizedBox(width: 10),
             pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Text("General Engineering Works",
-                      style: pw.TextStyle(font: boldFont, fontSize: 16)),
-                  pw.Text("C 35,36 UPSIDC Industrial Area, Prayagraj",
-                      style: baseTextStyle),
-                ])
-          ]),
-          pw.SizedBox(height: 10),
-          pw.Text("Routine Test Report",
-              style: pw.TextStyle(font: boldFont, fontSize: 16)),
-          pw.SizedBox(height: 6),
-          pw.Table(columnWidths: {
-            0: const pw.FlexColumnWidth(1),
-            1: const pw.FlexColumnWidth(1),
-          }, children: [
-            _row('Purchaser Name', data['purchaserName'], 'Reference',
-                data['purchaserReference'], baseTextStyle),
-            _row('Serial No', data['serialNo'], 'Date of Testing', data['date'],
-                baseTextStyle),
-            _row('KVA', data['kva'].toString(), 'Phases',
-                data['phases'].toString(), baseTextStyle),
-            _row('HV Voltage', data['hvVoltage'], 'LV Voltage',
-                data['lvVoltage'], baseTextStyle),
-            _row('Vector Group', data['vectorGroup'], 'Relevant IS',
-                data['relevantIS'], baseTextStyle),
-            _row(
-                'Tapping Range',
-                '${data['tappingRangeMax']}% to ${data['tappingRangeMin']}%',
-                'Step Voltage',
-                '${data['stepVoltage']}%',
-                baseTextStyle),
-          ])
-        ]);
-
-    pw.Widget footer(pw.Context context) => pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-          children: [
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                pw.Container(
-                  width: 180,
-                  height: 40,
-                  padding: const pw.EdgeInsets.all(6),
-                  decoration: pw.BoxDecoration(
-                    border: pw.Border.all(color: PdfColors.grey600),
-                  ),
-                  child: pw.Align(
-                    alignment: pw.Alignment.centerLeft,
-                    child: pw.Text("Tested by", style: baseTextStyle),
-                  ),
+                pw.Text(
+                  "General Engineering Works",
+                  style: pw.TextStyle(font: boldFont, fontSize: 16),
                 ),
-                pw.Container(
-                  width: 180,
-                  height: 40,
-                  padding: const pw.EdgeInsets.all(6),
-                  decoration: pw.BoxDecoration(
-                    border: pw.Border.all(color: PdfColors.grey600),
-                  ),
-                  child: pw.Align(
-                    alignment: pw.Alignment.centerLeft,
-                    child:
-                        pw.Text("", style: baseTextStyle), // empty middle box
-                  ),
-                ),
-                pw.Container(
-                  width: 180,
-                  height: 40,
-                  padding: const pw.EdgeInsets.all(6),
-                  decoration: pw.BoxDecoration(
-                    border: pw.Border.all(color: PdfColors.grey600),
-                  ),
-                  child: pw.Align(
-                    alignment: pw.Alignment.centerLeft,
-                    child: pw.Text("Witnessed by", style: baseTextStyle),
-                  ),
+                pw.Text(
+                  "C 35,36 UPSIDC Industrial Area, Prayagraj",
+                  style: baseTextStyle,
                 ),
               ],
             ),
-            pw.SizedBox(height: 8),
-            pw.Center(
-              child: pw.Text(
-                "The test report is generated by GEW ERP Software 1.1 and does not require any signature or stamp",
-                style: baseTextStyle.copyWith(
-                  fontSize: 8,
-                  color: PdfColors.grey600,
-                  fontStyle: pw.FontStyle.italic,
-                ),
-                textAlign: pw.TextAlign.center,
+          ],
+        ),
+        pw.SizedBox(height: 10),
+        pw.Text(
+          "Routine Test Report",
+          style: pw.TextStyle(font: boldFont, fontSize: 16),
+        ),
+        pw.SizedBox(height: 6),
+        pw.Table(
+          columnWidths: {
+            0: const pw.FlexColumnWidth(1),
+            1: const pw.FlexColumnWidth(1),
+          },
+          children: [
+            _row(
+              'Purchaser Name',
+              data['purchaserName'] ?? '',
+              'Reference',
+              data['purchaserReference'] ?? '',
+              baseTextStyle,
+            ),
+            _row(
+              'Serial No',
+              data['serialNo'] ?? '',
+              'Date of Testing',
+              data['date'] ?? '',
+              baseTextStyle,
+            ),
+            _row(
+              'KVA',
+              data['kva']?.toString() ?? '',
+              'Phases',
+              data['phases']?.toString() ?? '',
+              baseTextStyle,
+            ),
+            _row(
+              'HV Voltage',
+              data['hvVoltage']?.toString() ?? '',
+              'LV Voltage',
+              data['lvVoltage']?.toString() ?? '',
+              baseTextStyle,
+            ),
+            _row(
+              'Vector Group',
+              data['vectorGroup'] ?? '',
+              'Relevant IS',
+              data['relevantIS'] ?? '',
+              baseTextStyle,
+            ),
+            _row(
+              'Tapping Range',
+              '${data['tappingRangeMax'] ?? ''}% to ${data['tappingRangeMin'] ?? ''}%',
+              'Step Voltage',
+              '${data['stepVoltage'] ?? ''}%',
+              baseTextStyle,
+            ),
+          ],
+        ),
+      ],
+    );
+
+    pw.Widget footer(pw.Context context) => pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Container(
+              width: 180,
+              height: 40,
+              padding: const pw.EdgeInsets.all(6),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: PdfColors.grey600),
+              ),
+              child: pw.Align(
+                alignment: pw.Alignment.centerLeft,
+                child: pw.Text("Tested by", style: baseTextStyle),
+              ),
+            ),
+            pw.Container(
+              width: 180,
+              height: 40,
+              padding: const pw.EdgeInsets.all(6),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: PdfColors.grey600),
+              ),
+              child: pw.Align(
+                alignment: pw.Alignment.centerLeft,
+                child: pw.Text("", style: baseTextStyle), // empty middle box
+              ),
+            ),
+            pw.Container(
+              width: 180,
+              height: 40,
+              padding: const pw.EdgeInsets.all(6),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: PdfColors.grey600),
+              ),
+              child: pw.Align(
+                alignment: pw.Alignment.centerLeft,
+                child: pw.Text("Witnessed by", style: baseTextStyle),
               ),
             ),
           ],
-        );
+        ),
+        pw.SizedBox(height: 8),
+        pw.Center(
+          child: pw.Text(
+            "The test report is generated by GEW ERP Software 1.1 and does not require any signature or stamp",
+            style: baseTextStyle.copyWith(
+              fontSize: 8,
+              color: PdfColors.grey600,
+              fontStyle: pw.FontStyle.italic,
+            ),
+            textAlign: pw.TextAlign.center,
+          ),
+        ),
+      ],
+    );
 
     /* pdf.addPage(
       pw.MultiPage(
@@ -578,22 +622,31 @@ class TestReportPdfGenerator {
                         1: const pw.FlexColumnWidth(2),
                       },
                       border: pw.TableBorder.all(
-                          color: PdfColors.grey600, width: 0.5),
+                        color: PdfColors.grey600,
+                        width: 0.5,
+                      ),
                       children: [
                         pw.TableRow(
                           children: [
                             pw.Padding(
                               padding: const pw.EdgeInsets.symmetric(
-                                  vertical: 2, horizontal: 4),
-                              child:
-                                  pw.Text('Temperature', style: baseTextStyle),
+                                vertical: 2,
+                                horizontal: 4,
+                              ),
+                              child: pw.Text(
+                                'Temperature',
+                                style: baseTextStyle,
+                              ),
                             ),
                             pw.Padding(
                               padding: const pw.EdgeInsets.symmetric(
-                                  vertical: 2, horizontal: 4),
+                                vertical: 2,
+                                horizontal: 4,
+                              ),
                               child: pw.Text(
-                                  '${data['testData']['temperature']}°C',
-                                  style: baseTextStyle),
+                                '${data['testData']['temperature']}°C',
+                                style: baseTextStyle,
+                              ),
                             ),
                           ],
                         ),
@@ -601,15 +654,20 @@ class TestReportPdfGenerator {
                           children: [
                             pw.Padding(
                               padding: const pw.EdgeInsets.symmetric(
-                                  vertical: 2, horizontal: 4),
+                                vertical: 2,
+                                horizontal: 4,
+                              ),
                               child: pw.Text('HV-E', style: baseTextStyle),
                             ),
                             pw.Padding(
                               padding: const pw.EdgeInsets.symmetric(
-                                  vertical: 2, horizontal: 4),
+                                vertical: 2,
+                                horizontal: 4,
+                              ),
                               child: pw.Text(
-                                  '${data['testData']['insulationResistance']['hv-e']} MΩ',
-                                  style: baseTextStyle),
+                                '${data['testData']['insulationResistance']['hv-e']} MΩ',
+                                style: baseTextStyle,
+                              ),
                             ),
                           ],
                         ),
@@ -617,15 +675,20 @@ class TestReportPdfGenerator {
                           children: [
                             pw.Padding(
                               padding: const pw.EdgeInsets.symmetric(
-                                  vertical: 2, horizontal: 4),
+                                vertical: 2,
+                                horizontal: 4,
+                              ),
                               child: pw.Text('LV-E', style: baseTextStyle),
                             ),
                             pw.Padding(
                               padding: const pw.EdgeInsets.symmetric(
-                                  vertical: 2, horizontal: 4),
+                                vertical: 2,
+                                horizontal: 4,
+                              ),
                               child: pw.Text(
-                                  '${data['testData']['insulationResistance']['lv-e']} MΩ',
-                                  style: baseTextStyle),
+                                '${data['testData']['insulationResistance']['lv-e']} MΩ',
+                                style: baseTextStyle,
+                              ),
                             ),
                           ],
                         ),
@@ -633,15 +696,20 @@ class TestReportPdfGenerator {
                           children: [
                             pw.Padding(
                               padding: const pw.EdgeInsets.symmetric(
-                                  vertical: 2, horizontal: 4),
+                                vertical: 2,
+                                horizontal: 4,
+                              ),
                               child: pw.Text('HV-LV', style: baseTextStyle),
                             ),
                             pw.Padding(
                               padding: const pw.EdgeInsets.symmetric(
-                                  vertical: 2, horizontal: 4),
+                                vertical: 2,
+                                horizontal: 4,
+                              ),
                               child: pw.Text(
-                                  '${data['testData']['insulationResistance']['hv-lv']} MΩ',
-                                  style: baseTextStyle),
+                                '${data['testData']['insulationResistance']['hv-lv']} MΩ',
+                                style: baseTextStyle,
+                              ),
                             ),
                           ],
                         ),
@@ -657,18 +725,22 @@ class TestReportPdfGenerator {
                     pw.Row(
                       children: [
                         pw.Expanded(
-                            child: _buildResistance(
-                                'HV',
-                                'in Ohm',
-                                data['testData']['windingResistance']['hv'],
-                                hvResistance)),
+                          child: _buildResistance(
+                            'HV',
+                            'in Ohm',
+                            data['testData']['windingResistance']['hv'],
+                            hvResistance,
+                          ),
+                        ),
                         pw.SizedBox(width: 8),
                         pw.Expanded(
-                            child: _buildResistance(
-                                'LV',
-                                'in Ohm',
-                                data['testData']['windingResistance']['lv'],
-                                lvResistance)),
+                          child: _buildResistance(
+                            'LV',
+                            'in Ohm',
+                            data['testData']['windingResistance']['lv'],
+                            lvResistance,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -700,15 +772,19 @@ class TestReportPdfGenerator {
               // Your content
               pw.Column(
                 children: [
-                  _section('4. Measurement of No-Load Loss and Current',
-                      _buildNoLoadTable(noLoad, totalNoLoadLoss)),
                   _section(
-                      '5. Measurement of Short Circuit Impedance and Load Losses',
-                      _buildLoadTable(
-                          loadTest,
-                          totalLoadLoss.toStringAsFixed(2),
-                          loadLoss75.toStringAsFixed(2),
-                          z75.toStringAsFixed(2))),
+                    '4. Measurement of No-Load Loss and Current',
+                    _buildNoLoadTable(noLoad, totalNoLoadLoss),
+                  ),
+                  _section(
+                    '5. Measurement of Short Circuit Impedance and Load Losses',
+                    _buildLoadTable(
+                      loadTest,
+                      totalLoadLoss.toStringAsFixed(2),
+                      loadLoss75.toStringAsFixed(2),
+                      z75.toStringAsFixed(2),
+                    ),
+                  ),
                   _section(
                     '6. Induced Over Voltage Test',
                     pw.Container(
@@ -747,7 +823,7 @@ class TestReportPdfGenerator {
                               style: baseTextStyle,
                             ),
                           ],
-                        )
+                        ),
                       ],
                     ),
                   ),
@@ -809,37 +885,46 @@ class TestReportPdfGenerator {
                 pw.Column(
                   children: [
                     _section(
-                        'Preview Calculations: Winding Resistance',
-                        pw.Column(
-                          crossAxisAlignment: pw.CrossAxisAlignment.start,
-                          children: [
-                            pw.Text(
-                                'HV Avg Line Resistance: ${hvResistance['avg']!.toStringAsFixed(4)}',
-                                style: baseTextStyle),
-                            pw.Text(
-                                'HV R @ 75°C: ${hvResistance['r75']!.toStringAsFixed(4)}',
-                                style: baseTextStyle),
-                            pw.Text(
-                                'HV Current: ${hvResistance['current']!.toStringAsFixed(2)} A',
-                                style: baseTextStyle),
-                            pw.Text(
-                                'HV I²R Loss: ${hvResistance['loss']!.toStringAsFixed(2)} W',
-                                style: baseTextStyle),
-                            pw.SizedBox(height: 6),
-                            pw.Text(
-                                'LV Avg Line Resistance: ${lvResistance['avg']!.toStringAsFixed(4)}',
-                                style: baseTextStyle),
-                            pw.Text(
-                                'LV R @ 75°C: ${lvResistance['r75']!.toStringAsFixed(4)}',
-                                style: baseTextStyle),
-                            pw.Text(
-                                'LV Current: ${lvResistance['current']!.toStringAsFixed(2)} A',
-                                style: baseTextStyle),
-                            pw.Text(
-                                'LV I²R Loss: ${lvResistance['loss']!.toStringAsFixed(2)} W',
-                                style: baseTextStyle),
-                          ],
-                        )),
+                      'Preview Calculations: Winding Resistance',
+                      pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text(
+                            'HV Avg Line Resistance: ${hvResistance['avg']!.toStringAsFixed(4)}',
+                            style: baseTextStyle,
+                          ),
+                          pw.Text(
+                            'HV R @ 75°C: ${hvResistance['r75']!.toStringAsFixed(4)}',
+                            style: baseTextStyle,
+                          ),
+                          pw.Text(
+                            'HV Current: ${hvResistance['current']!.toStringAsFixed(2)} A',
+                            style: baseTextStyle,
+                          ),
+                          pw.Text(
+                            'HV I²R Loss: ${hvResistance['loss']!.toStringAsFixed(2)} W',
+                            style: baseTextStyle,
+                          ),
+                          pw.SizedBox(height: 6),
+                          pw.Text(
+                            'LV Avg Line Resistance: ${lvResistance['avg']!.toStringAsFixed(4)}',
+                            style: baseTextStyle,
+                          ),
+                          pw.Text(
+                            'LV R @ 75°C: ${lvResistance['r75']!.toStringAsFixed(4)}',
+                            style: baseTextStyle,
+                          ),
+                          pw.Text(
+                            'LV Current: ${lvResistance['current']!.toStringAsFixed(2)} A',
+                            style: baseTextStyle,
+                          ),
+                          pw.Text(
+                            'LV I²R Loss: ${lvResistance['loss']!.toStringAsFixed(2)} W',
+                            style: baseTextStyle,
+                          ),
+                        ],
+                      ),
+                    ),
                     _section(
                       'Load Test Preview Calculations',
                       pw.Column(
@@ -977,32 +1062,33 @@ class TestReportPdfGenerator {
   }
 
   static pw.Widget _buildResistance(
-      String label, String unit, Map res, Map<String, double> calc) {
-    final baseTextStyle = pw.TextStyle(
-      fontSize: 10,
-    );
+    String label,
+    String unit,
+    Map res,
+    Map<String, double> calc,
+  ) {
+    final baseTextStyle = pw.TextStyle(fontSize: 10);
     return pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          pw.Text('$label Winding Resistance $unit', style: baseTextStyle),
-          pw.TableHelper.fromTextArray(
-            headers: res.keys.toList(),
-            data: [res.values.map((e) => e.toString()).toList()],
-            border: pw.TableBorder.all(
-              color: PdfColors.grey,
-              width: 0.75,
-            ),
-            headerDecoration: pw.BoxDecoration(
-              color: PdfColors.white,
-            ),
-            headerStyle: pw.TextStyle(
-                // fontWeight: pw.FontWeight.bold,
-                fontSize: 10),
-            cellStyle: pw.TextStyle(fontSize: 10),
-            cellPadding:
-                const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 4),
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Text('$label Winding Resistance $unit', style: baseTextStyle),
+        pw.TableHelper.fromTextArray(
+          headers: res.keys.toList(),
+          data: [res.values.map((e) => e.toString()).toList()],
+          border: pw.TableBorder.all(color: PdfColors.grey, width: 0.75),
+          headerDecoration: pw.BoxDecoration(color: PdfColors.white),
+          headerStyle: pw.TextStyle(
+            // fontWeight: pw.FontWeight.bold,
+            fontSize: 10,
           ),
-        ]);
+          cellStyle: pw.TextStyle(fontSize: 10),
+          cellPadding: const pw.EdgeInsets.symmetric(
+            vertical: 2,
+            horizontal: 4,
+          ),
+        ),
+      ],
+    );
   }
 
   static pw.Widget _buildRatioTable(
@@ -1040,13 +1126,11 @@ class TestReportPdfGenerator {
           _deviation(calcRatio, user['W']),
         ];
       }),
-      border: pw.TableBorder.all(
-        color: PdfColors.grey,
-        width: 0.75,
-      ),
+      border: pw.TableBorder.all(color: PdfColors.grey, width: 0.75),
       headerStyle: pw.TextStyle(
-          // fontWeight: pw.FontWeight.bold,
-          fontSize: 10),
+        // fontWeight: pw.FontWeight.bold,
+        fontSize: 10,
+      ),
       cellStyle: pw.TextStyle(fontSize: 10),
       cellPadding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 4),
     );
@@ -1059,7 +1143,9 @@ class TestReportPdfGenerator {
   }
 
   static pw.Widget _buildNoLoadTable(
-      Map<String, dynamic> data, String noLoadLoss) {
+    Map<String, dynamic> data,
+    String noLoadLoss,
+  ) {
     return pw.TableHelper.fromTextArray(
       headers: ['Phase', 'Amp', 'Volt', 'Watt'],
       data: [
@@ -1068,23 +1154,23 @@ class TestReportPdfGenerator {
         ['W', data['W']['amp'], data['W']['volt'], data['W']['watt']],
         ['', '', 'Total Losses:', noLoadLoss],
       ],
-      border: pw.TableBorder.all(
-        color: PdfColors.grey,
-        width: 0.75,
-      ),
-      headerDecoration: pw.BoxDecoration(
-        color: PdfColors.white,
-      ),
+      border: pw.TableBorder.all(color: PdfColors.grey, width: 0.75),
+      headerDecoration: pw.BoxDecoration(color: PdfColors.white),
       headerStyle: pw.TextStyle(
-          // fontWeight: pw.FontWeight.bold,
-          fontSize: 10),
+        // fontWeight: pw.FontWeight.bold,
+        fontSize: 10,
+      ),
       cellStyle: pw.TextStyle(fontSize: 10),
       cellPadding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 4),
     );
   }
 
-  static pw.Widget _buildLoadTable(Map<String, dynamic> data,
-      String totalLosses, String lossat75, String zat75) {
+  static pw.Widget _buildLoadTable(
+    Map<String, dynamic> data,
+    String totalLosses,
+    String lossat75,
+    String zat75,
+  ) {
     return pw.TableHelper.fromTextArray(
       headers: ['Phase', 'Amp', 'Volt', 'Watt'],
       data: [
@@ -1095,16 +1181,12 @@ class TestReportPdfGenerator {
         ['', '', 'Load Losses at 75°C:', lossat75],
         ['', '', 'Impedance at 75°C:', zat75],
       ],
-      border: pw.TableBorder.all(
-        color: PdfColors.grey,
-        width: 0.75,
-      ),
-      headerDecoration: pw.BoxDecoration(
-        color: PdfColors.white,
-      ),
+      border: pw.TableBorder.all(color: PdfColors.grey, width: 0.75),
+      headerDecoration: pw.BoxDecoration(color: PdfColors.white),
       headerStyle: pw.TextStyle(
-          // fontWeight: pw.FontWeight.bold,
-          fontSize: 10),
+        // fontWeight: pw.FontWeight.bold,
+        fontSize: 10,
+      ),
       cellStyle: pw.TextStyle(fontSize: 10),
       cellPadding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 4),
     );
@@ -1171,7 +1253,9 @@ class _TestReportPreviewScreenState extends State<TestReportPreviewScreen> {
               onPressed: () async {
                 try {
                   final bytes = await TestReportPdfGenerator.generatePDF(
-                      widget.data, _isPreview); // returns Uint8List
+                    widget.data,
+                    _isPreview,
+                  ); // returns Uint8List
 
                   final dir = await getDownloadDirectory();
                   final fileName =
@@ -1182,8 +1266,10 @@ class _TestReportPreviewScreenState extends State<TestReportPreviewScreen> {
 
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                        content: Text(
-                            'PDF saved to ${file.path} and report stored.')),
+                      content: Text(
+                        'PDF saved to ${file.path} and report stored.',
+                      ),
+                    ),
                   );
                 } catch (e) {
                   ScaffoldMessenger.of(context).showSnackBar(

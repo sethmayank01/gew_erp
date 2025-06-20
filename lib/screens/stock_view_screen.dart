@@ -64,8 +64,9 @@ class _StockViewScreenState extends State<StockViewScreen> {
 
   Future<void> _loadJobs() async {
     final jobs = await ApiService.getOpenJobs();
-    final nonFinalizedJobs =
-        jobs.map<String>((job) => job['serialNo'].toString()).toList();
+    final nonFinalizedJobs = jobs
+        .map<String>((job) => job['serialNo'].toString())
+        .toList();
     setState(() => _jobNumbers = nonFinalizedJobs);
     for (var jobNo in nonFinalizedJobs) {
       final indents = await ApiService.getIndentsForJob(jobNo);
@@ -160,7 +161,9 @@ class _StockViewScreenState extends State<StockViewScreen> {
   }
 
   Future<void> _deleteStockEntry(
-      Map<String, dynamic> entry, bool isJobStock) async {
+    Map<String, dynamic> entry,
+    bool isJobStock,
+  ) async {
     await ApiService.removeStock(data: entry);
     setState(() {
       if (isJobStock) {
@@ -178,8 +181,11 @@ class _StockViewScreenState extends State<StockViewScreen> {
     required Map<String, bool> expandedKeys,
     required void Function(String) onToggleExpand,
   }) {
-    double total = grouped.values
-        .fold<double>(0.0, (a, b) => a + (b['finalValue'] as double));
+    double total = grouped.values.fold<double>(
+      0.0,
+      (a, b) => a + (b['finalValue'] as double),
+    );
+
     return ExpansionTile(
       title: Text(
         "$sectionTitle (Total ₹${total.toStringAsFixed(2)})",
@@ -189,6 +195,7 @@ class _StockViewScreenState extends State<StockViewScreen> {
         ...grouped.values.map((group) {
           final isExpanded = expandedKeys[group['key']] ?? false;
           final indentQty = _indentQtyMap[group['key']] ?? 0.0;
+
           return Card(
             margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
             child: Column(
@@ -196,10 +203,10 @@ class _StockViewScreenState extends State<StockViewScreen> {
                 ListTile(
                   title: isJobStock
                       ? Text(
-                          '${group['type']} - ${group['subtype']} - ${group['serialNo']}')
+                          '${group['type']} - ${group['subtype']} - ${group['serialNo']}',
+                        )
                       : Text('${group['type']} - ${group['subtype']}'),
                   subtitle: Text(
-                    // Indent Qty is now in the same row as Final Value
                     'Quantity: ${group['quantity'].toStringAsFixed(2)}   '
                     'Weighted Price: ₹${group['weightedPrice'].toStringAsFixed(2)}   '
                     'Final Value: ₹${group['finalValue'].toStringAsFixed(2)}   '
@@ -207,79 +214,117 @@ class _StockViewScreenState extends State<StockViewScreen> {
                   ),
                   trailing: IconButton(
                     icon: Icon(
-                        isExpanded ? Icons.expand_less : Icons.expand_more),
+                      isExpanded ? Icons.expand_less : Icons.expand_more,
+                    ),
                     onPressed: () => onToggleExpand(group['key']),
                   ),
                   onTap: () => onToggleExpand(group['key']),
                 ),
                 if (isExpanded)
                   Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 6,
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Entries:',
-                            style: TextStyle(fontWeight: FontWeight.bold)),
-                        ...group['entries'].map<Widget>((entry) {
-                          final qty =
-                              double.tryParse(entry['quantity'].toString()) ??
-                                  0.0;
-                          final price =
-                              double.tryParse(entry['price'].toString()) ?? 0.0;
-                          return ListTile(
-                            contentPadding:
-                                const EdgeInsets.symmetric(horizontal: 0),
-                            title: Row(
-                              children: [
-                                Text('Qty: ${qty.toStringAsFixed(2)}'),
-                                const SizedBox(width: 6),
-                                Text('Price: ₹${price.toStringAsFixed(2)}'),
-                                const SizedBox(width: 6),
-                                Text(
-                                    'Value: ₹${(qty * price).toStringAsFixed(2)}'),
-                              ],
-                            ),
-                            subtitle: entry['note'] != null
-                                ? Text('Note: ${entry['note']}')
-                                : null,
-                            trailing: (_role == 'admin')
-                                ? IconButton(
-                                    icon: Icon(Icons.delete, color: Colors.red),
-                                    onPressed: () async {
-                                      final confirm = await showDialog<bool>(
-                                        context: context,
-                                        builder: (context) => AlertDialog(
-                                          title: const Text("Confirm Deletion"),
-                                          content:
-                                              const Text("Delete this entry?"),
-                                          actions: [
-                                            TextButton(
-                                              onPressed: () =>
-                                                  Navigator.of(context)
-                                                      .pop(false),
-                                              child: const Text("Cancel"),
+                        const Text(
+                          'Entries:',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        // Sorting and mapping entries:
+                        ...(() {
+                          final entries = group['entries'];
+                          List<Map<String, dynamic>> sortedEntries =
+                              (entries is List)
+                              ? entries.cast<Map<String, dynamic>>()
+                              : <Map<String, dynamic>>[];
+
+                          sortedEntries.sort((a, b) {
+                            final aDate = a['entryDate'] != null
+                                ? DateTime.parse(a['entryDate'])
+                                : DateTime(1970);
+                            final bDate = b['entryDate'] != null
+                                ? DateTime.parse(b['entryDate'])
+                                : DateTime(1970);
+                            return bDate.compareTo(aDate);
+                          });
+
+                          return sortedEntries.map<Widget>((entry) {
+                            final qty =
+                                double.tryParse(entry['quantity'].toString()) ??
+                                0.0;
+                            final price =
+                                double.tryParse(entry['price'].toString()) ??
+                                0.0;
+                            return ListTile(
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 0,
+                              ),
+                              title: Row(
+                                children: [
+                                  Text('Qty: ${qty.toStringAsFixed(2)}'),
+                                  const SizedBox(width: 6),
+                                  Text('Price: ₹${price.toStringAsFixed(2)}'),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Value: ₹${(qty * price).toStringAsFixed(2)}',
+                                  ),
+                                ],
+                              ),
+                              subtitle: entry['note'] != null
+                                  ? Text('Note: ${entry['note']}')
+                                  : null,
+                              trailing: (_role == 'admin')
+                                  ? IconButton(
+                                      icon: Icon(
+                                        Icons.delete,
+                                        color: Colors.red,
+                                      ),
+                                      onPressed: () async {
+                                        final confirm = await showDialog<bool>(
+                                          context: context,
+                                          builder: (context) => AlertDialog(
+                                            title: const Text(
+                                              "Confirm Deletion",
                                             ),
-                                            TextButton(
-                                              onPressed: () =>
-                                                  Navigator.of(context)
-                                                      .pop(true),
-                                              child: const Text("Delete",
+                                            content: const Text(
+                                              "Delete this entry?",
+                                            ),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () => Navigator.of(
+                                                  context,
+                                                ).pop(false),
+                                                child: const Text("Cancel"),
+                                              ),
+                                              TextButton(
+                                                onPressed: () => Navigator.of(
+                                                  context,
+                                                ).pop(true),
+                                                child: const Text(
+                                                  "Delete",
                                                   style: TextStyle(
-                                                      color: Colors.red)),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                      if (confirm == true) {
-                                        await _deleteStockEntry(
-                                            entry, isJobStock);
-                                      }
-                                    },
-                                  )
-                                : null,
-                          );
-                        }).toList(),
+                                                    color: Colors.red,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                        if (confirm == true) {
+                                          await _deleteStockEntry(
+                                            entry,
+                                            isJobStock,
+                                          );
+                                        }
+                                      },
+                                    )
+                                  : null,
+                            );
+                          }).toList();
+                        })(),
                       ],
                     ),
                   ),
@@ -320,13 +365,17 @@ class _StockViewScreenState extends State<StockViewScreen> {
         .map((e) => {'job': e.key, 'value': e.value})
         .toList();
     if (_indentSortByValue) {
-      jobSummary.sort((a, b) => _indentSortAsc
-          ? a['value'].compareTo(b['value'])
-          : b['value'].compareTo(a['value']));
+      jobSummary.sort(
+        (a, b) => _indentSortAsc
+            ? a['value'].compareTo(b['value'])
+            : b['value'].compareTo(a['value']),
+      );
     } else {
-      jobSummary.sort((a, b) => _indentSortAsc
-          ? a['job'].compareTo(b['job'])
-          : b['job'].compareTo(a['job']));
+      jobSummary.sort(
+        (a, b) => _indentSortAsc
+            ? a['job'].compareTo(b['job'])
+            : b['job'].compareTo(a['job']),
+      );
     }
 
     return ExpansionTile(
@@ -351,14 +400,16 @@ class _StockViewScreenState extends State<StockViewScreen> {
                       },
                       child: Row(
                         children: [
-                          const Text("Job No.",
-                              style: TextStyle(fontWeight: FontWeight.bold)),
+                          const Text(
+                            "Job No.",
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
                           const SizedBox(width: 4),
                           Icon(
                             !_indentSortByValue
                                 ? (_indentSortAsc
-                                    ? Icons.arrow_upward
-                                    : Icons.arrow_downward)
+                                      ? Icons.arrow_upward
+                                      : Icons.arrow_downward)
                                 : Icons.unfold_more,
                             size: 16,
                           ),
@@ -376,14 +427,16 @@ class _StockViewScreenState extends State<StockViewScreen> {
                       },
                       child: Row(
                         children: [
-                          const Text("Issued Value",
-                              style: TextStyle(fontWeight: FontWeight.bold)),
+                          const Text(
+                            "Issued Value",
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
                           const SizedBox(width: 4),
                           Icon(
                             _indentSortByValue
                                 ? (_indentSortAsc
-                                    ? Icons.arrow_upward
-                                    : Icons.arrow_downward)
+                                      ? Icons.arrow_upward
+                                      : Icons.arrow_downward)
                                 : Icons.unfold_more,
                             size: 16,
                           ),
@@ -401,8 +454,10 @@ class _StockViewScreenState extends State<StockViewScreen> {
                     children: [
                       Expanded(child: Text(entry['job'])),
                       Expanded(
-                          child: Text(
-                              "₹${(entry['value'] as double).toStringAsFixed(2)}")),
+                        child: Text(
+                          "₹${(entry['value'] as double).toStringAsFixed(2)}",
+                        ),
+                      ),
                     ],
                   ),
                 );
@@ -415,14 +470,20 @@ class _StockViewScreenState extends State<StockViewScreen> {
   }
 
   Map<String, Map<String, dynamic>> _filterGrouped(
-      Map<String, Map<String, dynamic>> grouped) {
+    Map<String, Map<String, dynamic>> grouped,
+  ) {
     if (_searchQuery.isEmpty) return grouped;
     final q = _searchQuery.toLowerCase();
-    return Map.fromEntries(grouped.entries.where((e) =>
-        e.value['type'].toString().toLowerCase().contains(q) ||
-        e.value['subtype'].toString().toLowerCase().contains(q) ||
-        (e.value['serialNo']?.toString().toLowerCase().contains(q) ?? false) ||
-        e.key.toLowerCase().contains(q)));
+    return Map.fromEntries(
+      grouped.entries.where(
+        (e) =>
+            e.value['type'].toString().toLowerCase().contains(q) ||
+            e.value['subtype'].toString().toLowerCase().contains(q) ||
+            (e.value['serialNo']?.toString().toLowerCase().contains(q) ??
+                false) ||
+            e.key.toLowerCase().contains(q),
+      ),
+    );
   }
 
   @override
@@ -430,10 +491,14 @@ class _StockViewScreenState extends State<StockViewScreen> {
     final groupedGeneral = _filterGrouped(_groupGeneralStock());
     final groupedJob = _filterGrouped(_groupJobStock());
     final indentTotal = _calculateTotalIndentAllJobs();
-    final generalTotal = groupedGeneral.values
-        .fold<double>(0.0, (a, b) => a + (b['finalValue'] as double));
-    final jobTotal = groupedJob.values
-        .fold<double>(0.0, (a, b) => a + (b['finalValue'] as double));
+    final generalTotal = groupedGeneral.values.fold<double>(
+      0.0,
+      (a, b) => a + (b['finalValue'] as double),
+    );
+    final jobTotal = groupedJob.values.fold<double>(
+      0.0,
+      (a, b) => a + (b['finalValue'] as double),
+    );
     final grandTotal = generalTotal + jobTotal + indentTotal;
 
     return Scaffold(
@@ -456,7 +521,8 @@ class _StockViewScreenState extends State<StockViewScreen> {
                         prefixIcon: Icon(Icons.search),
                         hintText: "Search stock...",
                         border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8.0)),
+                          borderRadius: BorderRadius.circular(8.0),
+                        ),
                         suffixIcon: _searchQuery.isNotEmpty
                             ? IconButton(
                                 icon: Icon(Icons.clear),
@@ -479,9 +545,13 @@ class _StockViewScreenState extends State<StockViewScreen> {
                   Card(
                     child: ListTile(
                       title: const Text("Grand Total"),
-                      subtitle: Text("₹${grandTotal.toStringAsFixed(2)}",
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 18)),
+                      subtitle: Text(
+                        "₹${grandTotal.toStringAsFixed(2)}",
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 10),

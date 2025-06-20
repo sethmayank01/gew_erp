@@ -25,6 +25,7 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
   final _tapMinController = TextEditingController();
   final _stepVoltageController = TextEditingController();
   final _remarkController = TextEditingController();
+  final _quantityController = TextEditingController();
 
   String? _selectedVectorGroup;
   String? _selectedRelevantIS;
@@ -37,7 +38,7 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
     'Dyn11',
     'Ynd11',
     'Ddo',
-    'Not Applicable'
+    'Not Applicable',
   ];
   final List<String> _relevantISOptions = ['IS:2026', 'IS:1180'];
   final List<String> _tappingTypeOptions = ['OLTC', 'OCTC', 'No Tapping'];
@@ -95,14 +96,16 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
       'hvVoltage': _hvVoltageController.text,
       'lvVoltage': _lvVoltageController.text,
       'jobType': _selectedJobType,
-      'remark': _userRole == 'admin' ? _remarkController.text : null,
+      'remark': _remarkController.text,
+      'quantity': _quantityController.text,
       'entryDateTime': DateTime.now().toIso8601String(),
       'createdBy': username,
     };
 
     await ApiService.saveJob(data);
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Job saved successfully')));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Job saved successfully')));
 
     // Navigate to JobListScreen
     Navigator.pushReplacement(
@@ -120,8 +123,10 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
           labelText: label,
           isDense: true,
           border: const OutlineInputBorder(),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 10,
+          ),
         ),
         validator: (value) =>
             value == null || value.isEmpty ? 'Required' : null,
@@ -129,16 +134,22 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
     );
   }
 
-  Widget _buildDropdownField(String label, List<String> options,
-      String? selectedValue, void Function(String?) onChanged) {
+  Widget _buildDropdownField(
+    String label,
+    List<String> options,
+    String? selectedValue,
+    void Function(String?) onChanged,
+  ) {
     return SizedBox(
       width: MediaQuery.of(context).size.width / 2 - 24,
       child: InputDecorator(
         decoration: InputDecoration(
           labelText: label,
           isDense: true,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 10,
+          ),
           border: const OutlineInputBorder(),
         ),
         child: DropdownButtonHideUnderline(
@@ -158,12 +169,15 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Create New Job'), actions: [
-        IconButton(
-          icon: const Icon(Icons.home),
-          onPressed: () => context.go('/dashboard'),
-        ),
-      ]),
+      appBar: AppBar(
+        title: const Text('Create New Job'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.home),
+            onPressed: () => context.go('/dashboard'),
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(12.0),
         child: Form(
@@ -188,34 +202,41 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
                 _buildField(_kvaController, 'KVA'),
                 _buildField(_phasesController, 'Phases'),
                 _buildDropdownField(
-                    'Vector Group',
-                    _vectorGroupOptions,
-                    _selectedVectorGroup,
-                    (val) => setState(() => _selectedVectorGroup = val)),
+                  'Vector Group',
+                  _vectorGroupOptions,
+                  _selectedVectorGroup,
+                  (val) => setState(() => _selectedVectorGroup = val),
+                ),
                 _buildDropdownField(
-                    'Relevant IS',
-                    _relevantISOptions,
-                    _selectedRelevantIS,
-                    (val) => setState(() => _selectedRelevantIS = val)),
+                  'Relevant IS',
+                  _relevantISOptions,
+                  _selectedRelevantIS,
+                  (val) => setState(() => _selectedRelevantIS = val),
+                ),
                 _buildField(_hvVoltageController, 'HV Voltage'),
                 _buildField(_lvVoltageController, 'LV Voltage'),
                 _buildDropdownField(
-                    'Tapping Type', _tappingTypeOptions, _selectedTappingType,
-                    (val) {
-                  setState(() {
-                    _selectedTappingType = val;
-                    _showTapping = val != 'No Tapping';
-                  });
-                }),
+                  'Tapping Type',
+                  _tappingTypeOptions,
+                  _selectedTappingType,
+                  (val) {
+                    setState(() {
+                      _selectedTappingType = val;
+                      _showTapping = val != 'No Tapping';
+                    });
+                  },
+                ),
                 if (_showTapping) _buildField(_tapMaxController, 'Tapping Max'),
                 if (_showTapping) _buildField(_tapMinController, 'Tapping Min'),
                 if (_showTapping)
                   _buildField(_stepVoltageController, 'Step Voltage'),
-                if (_userRole == 'admin')
-                  _buildField(_remarkController, 'Remark'),
+                _buildField(_quantityController, 'Quantity'),
+                _buildField(_remarkController, 'Remark'),
                 const SizedBox(height: 12),
                 ElevatedButton(
-                    onPressed: _submitForm, child: const Text('Save Job')),
+                  onPressed: _submitForm,
+                  child: const Text('Save Job'),
+                ),
               ],
             ),
           ),

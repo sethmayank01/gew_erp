@@ -7,8 +7,6 @@ import 'package:uuid/uuid.dart';
 
 class ApiService {
   static const String lanUrl = 'http://192.168.2.160:5000';
-  //static const String cloudUrl = 'https://your-cloud-backend.com';
-  static const String cloudUrl = 'http://192.168.2.160:5000';
 
   static Future<http.Response> _sendRequest(
     String method,
@@ -19,14 +17,8 @@ class ApiService {
     Uri uri = Uri.parse(
       '$lanUrl$endpoint',
     ).replace(queryParameters: queryParams);
-    try {
-      return await _send(method, uri, body);
-    } catch (_) {
-      uri = Uri.parse(
-        '$cloudUrl$endpoint',
-      ).replace(queryParameters: queryParams);
-      return await _send(method, uri, body);
-    }
+
+    return await _send(method, uri, body);
   }
 
   static Future<http.Response> _send(
@@ -182,26 +174,32 @@ class ApiService {
 
   static Future<bool> addStock({required Map<String, dynamic> data}) async {
     //Add the stock entry per invoice/lot
-    final res = await _sendRequest(
-      'POST',
-      '/stock/add',
-      body: {'data': data},
-    );
+    final res = await _sendRequest('POST', '/stock/add', body: {'data': data});
     return res.statusCode == 200;
   }
 
-  static Future<bool> updateStockQuantity(
-      {required Map<String, dynamic> data, required double quantity}) async {
-    //Add the stock entry per invoice/lot
+  static Future<dynamic> updateStockQuantity({
+    required Map<String, dynamic> data,
+    required double quantity,
+  }) async {
     final res = await _sendRequest(
       'POST',
       '/stock/update',
-      body: {
-        'data': data,
-        'quantity': quantity,
-      },
+      body: {'data': data, 'quantity': quantity},
     );
-    return res.statusCode == 200;
+    if (res.statusCode == 200) {
+      return true;
+    } else {
+      // Try to extract a message
+      try {
+        final responseBody = jsonDecode(res.body);
+        final errorMessage =
+            responseBody['error'] ?? responseBody['message'] ?? 'Unknown error';
+        return errorMessage;
+      } catch (_) {
+        return 'Error: ${res.statusCode}';
+      }
+    }
   }
 
   static Future<void> updateStock({
@@ -262,30 +260,49 @@ class ApiService {
       '/job_indents',
       body: {'data': data},
     );
-    return res.statusCode == 201;
+    return res.statusCode == 200;
   }
 
   static Future<List<dynamic>> getIndentsForJob(String jobId) async {
-    final res = await _sendRequest('GET', '/job_indents/$jobId');
-    return jsonDecode(res.body);
+    try {
+      final res = await _sendRequest('GET', '/job_indents/$jobId');
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body);
+      } else {
+        throw Exception('Failed to load indents: ${_extractError(res)}');
+      }
+    } catch (e) {
+      throw Exception('Error fetching job indents: $e');
+    }
   }
 
   static Future<List<dynamic>> getIndentStockList() async {
-    final res = await _sendRequest('GET', '/indent_stock');
-    return jsonDecode(res.body);
+    try {
+      final res = await _sendRequest('GET', '/indent_stock');
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body);
+      } else {
+        throw Exception(
+          'Failed to load indent stock list: ${_extractError(res)}',
+        );
+      }
+    } catch (e) {
+      throw Exception('Error fetching indent stock list: $e');
+    }
   }
 
   static Future<String> updateJobIndent({
     required Map<String, dynamic> data,
   }) async {
-    final res = await _sendRequest('PUT', '/job_indents', body: data);
-    if (res.statusCode == 200)
-      return "Success";
-    else {
-      final responseBody = json.decode(res.body);
-      final errorMessage =
-          responseBody['error'] ?? responseBody['message'] ?? 'Unknown error';
-      return 'Error: $errorMessage';
+    try {
+      final res = await _sendRequest('PUT', '/job_indents', body: data);
+      if (res.statusCode == 200) {
+        return "Success";
+      } else {
+        return 'Error: ${_extractError(res)}';
+      }
+    } catch (e) {
+      return 'Error: $e';
     }
   }
 
@@ -296,7 +313,26 @@ class ApiService {
       // Skip updating stock and return the error message
       return 'Job Indent Failed: $jobIndentResult';
     }
-    await updateStock(data: data, reduce: true);
-    return 'Success';
+    try {
+      await updateStock(data: data, reduce: true);
+      return 'Success';
+    } catch (e) {
+      return 'Error updating stock: $e';
+    }
+  }
+
+  static String _extractError(http.Response res) {
+    try {
+      final body = json.decode(res.body);
+      if (body is Map<String, dynamic>) {
+        return body['error'] ??
+            body['message'] ??
+            res.reasonPhrase ??
+            'Unknown error';
+      }
+      return res.reasonPhrase ?? 'Unknown error';
+    } catch (_) {
+      return res.reasonPhrase ?? 'Unknown error';
+    }
   }
 }

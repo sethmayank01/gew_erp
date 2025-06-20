@@ -35,12 +35,28 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
   List<Map<String, dynamic>> _outgoingList = [];
   bool _isLoadingOutgoing = false;
 
+  // Search feature
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
   @override
   void initState() {
     super.initState();
     _loadInitialData();
     _loadUser();
     _loadOutgoingList();
+    _searchController.addListener(() {
+      setState(() {
+        _searchQuery = _searchController.text.trim().toLowerCase();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _issueQtyController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadUser() async {
@@ -56,7 +72,8 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
     final materials = await ApiService.getMaterials();
     setState(() {
       _jobs = List<Map<String, dynamic>>.from(
-          jobs.where((job) => job['isFinal'] != true));
+        jobs.where((job) => job['isFinal'] != true),
+      );
       _materials = List<Map<String, dynamic>>.from(materials);
       _isLoading = false;
     });
@@ -68,8 +85,23 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
     });
     try {
       final outgoing = await ApiService.getOutgoingMaterials();
+      // Sort the outgoing list by issued date (newest first)
+      List<Map<String, dynamic>> sortedOutgoing =
+          List<Map<String, dynamic>>.from(outgoing);
+      sortedOutgoing.sort((a, b) {
+        final aDate = a['out_time'] != null
+            ? DateTime.tryParse(a['out_time'])
+            : null;
+        final bDate = b['out_time'] != null
+            ? DateTime.tryParse(b['out_time'])
+            : null;
+        if (aDate == null && bDate == null) return 0;
+        if (aDate == null) return 1;
+        if (bDate == null) return -1;
+        return bDate.compareTo(aDate); // Newest to oldest
+      });
       setState(() {
-        _outgoingList = List<Map<String, dynamic>>.from(outgoing);
+        _outgoingList = sortedOutgoing;
         _isLoadingOutgoing = false;
       });
     } catch (e) {
@@ -88,18 +120,21 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
 
     final stock = await ApiService.getStock(material['jobSpecific']);
     List<Map<String, dynamic>> matching = stock
-        .where((s) =>
-            s['type'] == material['type'] &&
-            s['subtype'] == material['subtype'] &&
-            (material['jobSpecific'] != true ||
-                s['serialNo'] == _selectedJob!['serialNo']))
+        .where(
+          (s) =>
+              s['type'] == material['type'] &&
+              s['subtype'] == material['subtype'] &&
+              (material['jobSpecific'] != true ||
+                  s['serialNo'] == _selectedJob!['serialNo']),
+        )
         .toList()
         .cast<Map<String, dynamic>>();
 
     matching.sort((a, b) {
-      if (a['receivedDate'] != null && b['receivedDate'] != null) {
-        return DateTime.parse(a['receivedDate'])
-            .compareTo(DateTime.parse(b['receivedDate']));
+      if (a['entryDate'] != null && b['entryDate'] != null) {
+        return DateTime.parse(
+          b['entryDate'],
+        ).compareTo(DateTime.parse(a['entryDate'])); // Newest to oldest
       }
       return 0;
     });
@@ -109,8 +144,9 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
       (sum, e) => sum + (double.tryParse(e['quantity'].toString()) ?? 0.0),
     );
 
-    final indentData =
-        await ApiService.getIndentsForJob(_selectedJob!['serialNo']);
+    final indentData = await ApiService.getIndentsForJob(
+      _selectedJob!['serialNo'],
+    );
     final matchedIndent = indentData.firstWhere(
       (i) =>
           i['type'] == material['type'] &&
@@ -133,6 +169,26 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
     if (_selectedJob == null || _selectedMaterial == null || issueQty <= 0)
       return;
 
+    // Validation: must not issue more than indentQty and availableQty
+    if (issueQty > _indentQty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Cannot issue more than indent quantity ($_indentQty)'),
+        ),
+      );
+      return;
+    }
+    if (issueQty > _availableQty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Cannot issue more than available stock ($_availableQty)',
+          ),
+        ),
+      );
+      return;
+    }
+
     double qtyRequired = issueQty;
     double totalIssued = 0;
     double weightedPriceSum = 0;
@@ -153,11 +209,21 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
       totalIssued += takeQty;
       qtyRequired -= takeQty;
 
-      await ApiService.updateStockQuantity(data: entry, quantity: takeQty);
+      final updateResult = await ApiService.updateStockQuantity(
+        data: entry,
+        quantity: takeQty,
+      );
+      if (updateResult != true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Stock update failed: $updateResult')),
+        );
+        return; // Exit early on error
+      }
     }
 
-    double weightedAvgPrice =
-        totalIssued > 0 ? weightedPriceSum / totalIssued : 0;
+    double weightedAvgPrice = totalIssued > 0
+        ? weightedPriceSum / totalIssued
+        : 0;
 
     final material = _selectedMaterial!;
     final data = {
@@ -200,26 +266,13 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
       await _onMaterialSelected(material);
       await _loadOutgoingList();
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $result')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $result')));
     }
   }
 
   Widget _buildOutgoingTable() {
-    if (_isLoadingOutgoing) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_outgoingList.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.only(top: 32),
-        child: Text(
-          "No outgoing material entries.",
-          style: TextStyle(color: Colors.grey),
-        ),
-      );
-    }
-
     // Table headers
     final columns = [
       'Job',
@@ -228,8 +281,23 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
       'Unit Price',
       'Issued Value',
       'Issued By',
-      'Issued On'
+      'Issued On',
     ];
+
+    if (_isLoadingOutgoing) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    // Search filter
+    final filteredOutgoingList = _outgoingList.where((entry) {
+      final search = _searchQuery;
+      if (search.isEmpty) return true;
+      return (entry['serialNo'] ?? '').toString().toLowerCase().contains(
+            search,
+          ) ||
+          (entry['material'] ?? '').toString().toLowerCase().contains(search) ||
+          (entry['user_out'] ?? '').toString().toLowerCase().contains(search);
+    }).toList();
 
     return Padding(
       padding: const EdgeInsets.only(top: 32),
@@ -241,31 +309,63 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
           ),
           const SizedBox(height: 12),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
-              columns: columns
-                  .map((c) => DataColumn(
-                      label: Text(c,
-                          style: const TextStyle(fontWeight: FontWeight.bold))))
-                  .toList(),
-              rows: _outgoingList.map((entry) {
-                return DataRow(
-                  cells: [
-                    DataCell(Text(entry['serialNo'] ?? '')),
-                    DataCell(Text(entry['material'] ?? '')),
-                    DataCell(Text('${entry['issuedQty'] ?? ''}')),
-                    DataCell(Text(
-                        '₹${(entry['weightedAvgPrice'] ?? 0).toStringAsFixed(2)}')),
-                    DataCell(Text(
-                        '₹${(entry['issuedValue'] ?? 0).toStringAsFixed(2)}')),
-                    DataCell(Text(entry['user_out'] ?? '')),
-                    DataCell(Text(entry['out_time'] ?? '')),
-                  ],
-                );
-              }).toList(),
+          // Always show search box:
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8.0),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                labelText: 'Search outgoing entries',
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(),
+              ),
             ),
           ),
+          if (filteredOutgoingList.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(top: 32),
+              child: Text(
+                "No outgoing material entries.",
+                style: TextStyle(color: Colors.grey),
+              ),
+            )
+          else
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                columns: columns
+                    .map(
+                      (c) => DataColumn(
+                        label: Text(
+                          c,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    )
+                    .toList(),
+                rows: filteredOutgoingList.map((entry) {
+                  return DataRow(
+                    cells: [
+                      DataCell(Text(entry['serialNo'] ?? '')),
+                      DataCell(Text(entry['material'] ?? '')),
+                      DataCell(Text('${entry['issuedQty'] ?? ''}')),
+                      DataCell(
+                        Text(
+                          '₹${(entry['weightedAvgPrice'] ?? 0).toStringAsFixed(2)}',
+                        ),
+                      ),
+                      DataCell(
+                        Text(
+                          '₹${(entry['issuedValue'] ?? 0).toStringAsFixed(2)}',
+                        ),
+                      ),
+                      DataCell(Text(entry['user_out'] ?? '')),
+                      DataCell(Text(entry['out_time'] ?? '')),
+                    ],
+                  );
+                }).toList(),
+              ),
+            ),
         ],
       ),
     );
@@ -286,14 +386,17 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       DropdownButtonFormField<Map<String, dynamic>>(
-                        decoration:
-                            const InputDecoration(labelText: 'Select Job'),
+                        decoration: const InputDecoration(
+                          labelText: 'Select Job',
+                        ),
                         value: _selectedJob,
                         items: _jobs
-                            .map((job) => DropdownMenuItem(
-                                  value: job,
-                                  child: Text(job['serialNo'] ?? 'Unknown'),
-                                ))
+                            .map(
+                              (job) => DropdownMenuItem(
+                                value: job,
+                                child: Text(job['serialNo'] ?? 'Unknown'),
+                              ),
+                            )
                             .toList(),
                         onChanged: (val) async {
                           setState(() => _selectedJob = val);
@@ -306,8 +409,9 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                       ),
                       const SizedBox(height: 16),
                       DropdownButtonFormField<Map<String, dynamic>>(
-                        decoration:
-                            const InputDecoration(labelText: 'Select Material'),
+                        decoration: const InputDecoration(
+                          labelText: 'Select Material',
+                        ),
                         value: _selectedMaterial,
                         items: _materials.map((mat) {
                           final matKey = mat['type'] + '-' + mat['subtype'];
@@ -329,7 +433,8 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                       TextFormField(
                         controller: _issueQtyController,
                         keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true),
+                          decimal: true,
+                        ),
                         decoration: const InputDecoration(
                           labelText: 'Quantity to Issue',
                           border: OutlineInputBorder(),
@@ -341,6 +446,8 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                           if (parsed <= 0) return 'Quantity must be > 0';
                           if (parsed > _availableQty)
                             return 'Cannot issue more than available stock ($_availableQty)';
+                          if (parsed > _indentQty)
+                            return 'Cannot issue more than indent quantity ($_indentQty)';
                           return null;
                         },
                       ),
@@ -349,32 +456,40 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                           double.tryParse(_issueQtyController.text) != null &&
                           double.tryParse(_issueQtyController.text)! > 0 &&
                           _matchingStockEntries.isNotEmpty))
-                        Builder(builder: (_) {
-                          final reqQty =
-                              double.tryParse(_issueQtyController.text)!;
-                          double qtyLeft = reqQty;
-                          List<Widget> batches = [];
-                          for (var entry in _matchingStockEntries) {
-                            if (qtyLeft <= 0) break;
-                            final avail = (double.tryParse(
-                                    entry['quantity'].toString()) ??
-                                0.0);
-                            final take = min(qtyLeft, avail);
-                            batches.add(Text(
-                                'Take $take from batch @ ₹${entry['price']} (StockID: ${entry['id'] ?? entry['key']})'));
-                            qtyLeft -= take;
-                          }
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                "FIFO Batches to be Consumed:",
-                                style: TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                              ...batches
-                            ],
-                          );
-                        }),
+                        Builder(
+                          builder: (_) {
+                            final reqQty = double.tryParse(
+                              _issueQtyController.text,
+                            )!;
+                            double qtyLeft = reqQty;
+                            List<Widget> batches = [];
+                            for (var entry in _matchingStockEntries) {
+                              if (qtyLeft <= 0) break;
+                              final avail =
+                                  (double.tryParse(
+                                    entry['quantity'].toString(),
+                                  ) ??
+                                  0.0);
+                              final take = min(qtyLeft, avail);
+                              batches.add(
+                                Text(
+                                  'Take $take from batch @ ₹${entry['price']} (StockID: ${entry['id'] ?? entry['key']})',
+                                ),
+                              );
+                              qtyLeft -= take;
+                            }
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  "FIFO Batches to be Consumed:",
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                                ...batches,
+                              ],
+                            );
+                          },
+                        ),
                       const SizedBox(height: 16),
                       ElevatedButton(
                         onPressed: () {

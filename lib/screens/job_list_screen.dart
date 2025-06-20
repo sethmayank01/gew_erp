@@ -26,11 +26,26 @@ class _JobListScreenState extends State<JobListScreen> {
     'Repair - Dispatched',
   ];
 
+  // Search feature
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
   @override
   void initState() {
     super.initState();
     _loadUserRole();
     _loadJobs();
+    _searchController.addListener(() {
+      setState(() {
+        _searchQuery = _searchController.text.trim().toLowerCase();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadUserRole() async {
@@ -52,8 +67,9 @@ class _JobListScreenState extends State<JobListScreen> {
     await _loadJobs();
   }
 
+  // Filter + Search together
   List<Map<String, dynamic>> get _filteredJobs {
-    return _jobs.where((job) {
+    List<Map<String, dynamic>> jobs = _jobs.where((job) {
       final jobType = job['jobType'] ?? '';
       final dispatched =
           job['dispatchDate'] != null && job['dispatchDate'] != '';
@@ -75,6 +91,24 @@ class _JobListScreenState extends State<JobListScreen> {
           return true;
       }
     }).toList();
+
+    if (_searchQuery.isNotEmpty) {
+      jobs = jobs.where((job) {
+        return (job['serialNo'] ?? '').toString().toLowerCase().contains(
+              _searchQuery,
+            ) ||
+            (job['purchaserName'] ?? '').toString().toLowerCase().contains(
+              _searchQuery,
+            ) ||
+            (job['purchaserReference'] ?? '').toString().toLowerCase().contains(
+              _searchQuery,
+            ) ||
+            (job['jobType'] ?? '').toString().toLowerCase().contains(
+              _searchQuery,
+            );
+      }).toList();
+    }
+    return jobs;
   }
 
   String _formatDate(String? isoDate) {
@@ -105,8 +139,10 @@ class _JobListScreenState extends State<JobListScreen> {
     await _updateJob(job);
   }
 
+  // Responsive build
   @override
   Widget build(BuildContext context) {
+    final isWideScreen = MediaQuery.of(context).size.width > 850;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Job List'),
@@ -124,50 +160,244 @@ class _JobListScreenState extends State<JobListScreen> {
             items: _filterOptions
                 .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                 .toList(),
-          )
+          ),
         ],
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          return SingleChildScrollView(
-            scrollDirection: Axis.vertical,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: constraints.maxHeight),
-              child: IntrinsicHeight(
-                child: Column(
-                  children: [
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Padding(
-                        padding: const EdgeInsets.all(8),
-                        child: _buildHeaderRow(),
-                      ),
-                    ),
-                    const Divider(height: 0),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Column(
-                          children: _filteredJobs.map((job) {
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 4),
-                              child: _buildJobRow(job),
-                            );
-                          }).toList(),
-                        ),
-                      ),
-                    ),
-                  ],
+      body: Column(
+        children: [
+          // Search bar always visible
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: SizedBox(
+              width: 350,
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  labelText: 'Search jobs',
+                  prefixIcon: Icon(Icons.search),
+                  border: OutlineInputBorder(),
                 ),
               ),
             ),
-          );
-        },
+          ),
+          Expanded(
+            child: isWideScreen ? _buildWideTable() : _buildMobileList(),
+          ),
+        ],
       ),
     );
   }
 
+  // Desktop/tablet (wide) layout: table
+  Widget _buildWideTable() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          scrollDirection: Axis.vertical,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: IntrinsicHeight(
+              child: Column(
+                children: [
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: _buildHeaderRow(),
+                    ),
+                  ),
+                  const Divider(height: 0),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: _filteredJobs.isEmpty
+                          ? const Padding(
+                              padding: EdgeInsets.all(24),
+                              child: Text(
+                                "No jobs found.",
+                                style: TextStyle(color: Colors.grey),
+                              ),
+                            )
+                          : Column(
+                              children: _filteredJobs.map((job) {
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  child: _buildJobRow(job),
+                                );
+                              }).toList(),
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // Mobile layout: card view
+  Widget _buildMobileList() {
+    final jobs = _filteredJobs;
+    if (jobs.isEmpty) {
+      return const Center(child: Text('No jobs found.'));
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      itemCount: jobs.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (context, idx) {
+        final job = jobs[idx];
+        return Card(
+          child: InkWell(
+            onTap: () {
+              showModalBottomSheet(
+                context: context,
+                builder: (_) => _buildJobDetailSheet(job),
+                isScrollControlled: true,
+                shape: const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                ),
+              );
+            },
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Serial No: ${job['serialNo'] ?? '-'}',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      if (_userRole == 'admin')
+                        Checkbox(
+                          value: job['isFinal'] == true,
+                          onChanged: (val) => _toggleFinal(job, val),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text('Purchaser: ${job['purchaserName'] ?? '-'}'),
+                  Text('Job Type: ${job['jobType'] ?? '-'}'),
+                  Text(
+                    'KVA: ${job['kva'] ?? '-'} | Phases: ${job['phases'] ?? '-'}',
+                  ),
+                  Text(
+                    'HV: ${job['hvVoltage'] ?? '-'} | LV: ${job['lvVoltage'] ?? '-'}',
+                  ),
+                  Text('Dispatched: ${_formatDate(job['dispatchDate'])}'),
+                  Text('Final: ${job['isFinal'] == true ? 'Yes' : 'No'}'),
+                  if (_userRole == 'admin')
+                    Row(
+                      children: [
+                        const Text(
+                          'Dispatch Date:',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.calendar_today, size: 16),
+                          onPressed: () => _selectDispatchDate(job),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildJobDetailSheet(Map<String, dynamic> job) {
+    // Show all fields in a bottom sheet for mobile
+    return DraggableScrollableSheet(
+      expand: false,
+      minChildSize: 0.35,
+      maxChildSize: 0.85,
+      builder: (context, scrollController) => SingleChildScrollView(
+        controller: scrollController,
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Serial No: ${job['serialNo'] ?? '-'}',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+            const Divider(),
+            _buildDetailRow('Purchaser Name', job['purchaserName']),
+            _buildDetailRow('Purchaser Reference', job['purchaserReference']),
+            _buildDetailRow('Job Type', job['jobType']),
+            _buildDetailRow('KVA', job['kva']),
+            _buildDetailRow('Phases', job['phases']),
+            _buildDetailRow('HV Voltage', job['hvVoltage']),
+            _buildDetailRow('LV Voltage', job['lvVoltage']),
+            _buildDetailRow('Vector Group', job['vectorGroup']),
+            _buildDetailRow('IS', job['relevantIS']),
+            _buildDetailRow('Tapping Type', job['tappingType']),
+            _buildDetailRow('Tapping Range Max', job['tappingRangeMax']),
+            _buildDetailRow('Tapping Range Min', job['tappingRangeMin']),
+            _buildDetailRow('Step Voltage', job['stepVoltage']),
+            if (_userRole == 'admin') _buildDetailRow('Remark', job['remark']),
+            _buildDetailRow('Dispatched', _formatDate(job['dispatchDate'])),
+            _buildDetailRow('Final', job['isFinal'] == true ? 'Yes' : 'No'),
+            _buildDetailRow(
+              'Created',
+              '${_formatDate(job['entryDateTime'])} by ${job['createdBy'] ?? '-'}',
+            ),
+            if (_userRole == 'admin')
+              Row(
+                children: [
+                  const Text(
+                    'Dispatch Date:',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.calendar_today, size: 16),
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      _selectDispatchDate(job);
+                    },
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(String label, dynamic value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 120,
+            child: Text(
+              '$label:',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+          Expanded(
+            child: Text(value?.toString() ?? '-', style: const TextStyle()),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Wide table headers for desktop/tablet
   Widget _buildHeaderRow() {
     return Row(
       children: [
@@ -249,9 +479,10 @@ class _JobListScreenState extends State<JobListScreen> {
               : Text(job['isFinal'] == true ? 'Yes' : 'No'),
         ),
         _buildCell(
-            '${_formatDate(job['entryDateTime'])} by ${job['createdBy'] ?? '-'}',
-            colWidth,
-            wrap: true),
+          '${_formatDate(job['entryDateTime'])} by ${job['createdBy'] ?? '-'}',
+          colWidth,
+          wrap: true,
+        ),
         if (_userRole == 'admin')
           SizedBox(
             width: narrowWidth,
@@ -266,26 +497,4 @@ class _JobListScreenState extends State<JobListScreen> {
 
   final double colWidth = 80;
   final double narrowWidth = 60;
-
-  Widget _buildField(String label, dynamic value, {bool wrap = false}) {
-    return Container(
-      constraints: wrap ? const BoxConstraints(maxWidth: 80) : null,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10),
-          ),
-          Text(
-            value?.toString() ?? '-',
-            style: const TextStyle(fontSize: 10),
-            softWrap: wrap,
-            overflow: wrap ? TextOverflow.visible : TextOverflow.ellipsis,
-            maxLines: wrap ? 3 : 1,
-          ),
-        ],
-      ),
-    );
-  }
 }

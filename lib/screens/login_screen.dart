@@ -37,7 +37,9 @@ class _LoginScreenState extends State<LoginScreen> {
       );*/
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
-          'username', _usernameController.text.trim()); // 👈 set username
+        'username',
+        _usernameController.text.trim(),
+      ); // 👈 set username
       await prefs.setString('role', token['role']); // 👈 set role from response
       context.go('/dashboard');
     } else {
@@ -69,7 +71,7 @@ class _LoginScreenState extends State<LoginScreen> {
             const SizedBox(height: 12),
             ElevatedButton(
               onPressed: _isLoading ? null : _login,
-              child: const Text('Login'),
+              child: const Text('Submit'),
             ),
           ],
         ),
