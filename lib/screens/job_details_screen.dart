@@ -31,6 +31,8 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
   String? _selectedRelevantIS;
   String? _selectedTappingType;
   String? _selectedJobType;
+  String? _selectedMaterial =
+      'Copper'; // Default value (keep default for Material only)
   String _userRole = '';
   bool _showTapping = true;
 
@@ -43,6 +45,7 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
   final List<String> _relevantISOptions = ['IS:2026', 'IS:1180'];
   final List<String> _tappingTypeOptions = ['OLTC', 'OCTC', 'No Tapping'];
   final List<String> _jobTypeOptions = ['New', 'Repair'];
+  final List<String> _materialOptions = ['Copper', 'Aluminium'];
 
   @override
   void initState() {
@@ -96,6 +99,7 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
       'hvVoltage': _hvVoltageController.text,
       'lvVoltage': _lvVoltageController.text,
       'jobType': _selectedJobType,
+      'material': _selectedMaterial ?? 'Copper',
       'remark': _remarkController.text,
       'quantity': _quantityController.text,
       'entryDateTime': DateTime.now().toIso8601String(),
@@ -140,6 +144,8 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
     String? selectedValue,
     void Function(String?) onChanged,
   ) {
+    // Only Material will have a default value, others default to null (no selection)
+    final bool isMaterial = label == 'Material';
     return SizedBox(
       width: MediaQuery.of(context).size.width / 2 - 24,
       child: InputDecorator(
@@ -154,12 +160,19 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
         ),
         child: DropdownButtonHideUnderline(
           child: DropdownButton<String>(
-            value: selectedValue,
+            value: isMaterial
+                ? (selectedValue != null && options.contains(selectedValue)
+                      ? selectedValue
+                      : options.first)
+                : (selectedValue != null && options.contains(selectedValue)
+                      ? selectedValue
+                      : null), // no default for non-material
             isExpanded: true,
             onChanged: onChanged,
             items: options
                 .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                 .toList(),
+            hint: Text('Select $label'),
           ),
         ),
       ),
@@ -230,6 +243,12 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
                 if (_showTapping) _buildField(_tapMinController, 'Tapping Min'),
                 if (_showTapping)
                   _buildField(_stepVoltageController, 'Step Voltage'),
+                _buildDropdownField(
+                  'Material',
+                  _materialOptions,
+                  _selectedMaterial,
+                  (val) => setState(() => _selectedMaterial = val ?? 'Copper'),
+                ),
                 _buildField(_quantityController, 'Quantity'),
                 _buildField(_remarkController, 'Remark'),
                 const SizedBox(height: 12),

@@ -57,8 +57,25 @@ class _JobListScreenState extends State<JobListScreen> {
 
   Future<void> _loadJobs() async {
     final jobs = await ApiService.getJobs();
+    // Sort jobs in descending order by serialNo (assuming serialNo is numeric or sortable correctly as string)
+    List<Map<String, dynamic>> sortedJobs = List<Map<String, dynamic>>.from(
+      jobs,
+    );
+    sortedJobs.sort((a, b) {
+      // If serialNo is numeric, compare as int, else as string
+      final aVal = int.tryParse(a['serialNo']?.toString() ?? '');
+      final bVal = int.tryParse(b['serialNo']?.toString() ?? '');
+      if (aVal != null && bVal != null) {
+        return bVal.compareTo(aVal);
+      } else {
+        // fallback to string compare
+        return (b['serialNo']?.toString() ?? '').compareTo(
+          a['serialNo']?.toString() ?? '',
+        );
+      }
+    });
     setState(() {
-      _jobs = List<Map<String, dynamic>>.from(jobs);
+      _jobs = sortedJobs;
     });
   }
 
@@ -286,6 +303,10 @@ class _JobListScreenState extends State<JobListScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text('Purchaser: ${job['purchaserName'] ?? '-'}'),
+                  Text(
+                    'Purchaser Reference: ${job['purchaserReference'] ?? '-'}',
+                  ),
+                  Text('Quantity: ${job['quantity'] ?? '-'}'),
                   Text('Job Type: ${job['jobType'] ?? '-'}'),
                   Text(
                     'KVA: ${job['kva'] ?? '-'} | Phases: ${job['phases'] ?? '-'}',
@@ -336,6 +357,7 @@ class _JobListScreenState extends State<JobListScreen> {
             const Divider(),
             _buildDetailRow('Purchaser Name', job['purchaserName']),
             _buildDetailRow('Purchaser Reference', job['purchaserReference']),
+            _buildDetailRow('Quantity', job['quantity']),
             _buildDetailRow('Job Type', job['jobType']),
             _buildDetailRow('KVA', job['kva']),
             _buildDetailRow('Phases', job['phases']),
@@ -404,6 +426,7 @@ class _JobListScreenState extends State<JobListScreen> {
         _buildHeaderCell('Serial No', narrowWidth),
         _buildHeaderCell('Purchaser Name', colWidth),
         _buildHeaderCell('Purchaser Ref', colWidth),
+        _buildHeaderCell('Quantity', narrowWidth),
         _buildHeaderCell('Job Type', narrowWidth),
         _buildHeaderCell('KVA', narrowWidth),
         _buildHeaderCell('Phases', narrowWidth),
@@ -416,10 +439,13 @@ class _JobListScreenState extends State<JobListScreen> {
         _buildHeaderCell('Min', narrowWidth),
         _buildHeaderCell('Step', narrowWidth),
         if (_userRole == 'admin') _buildHeaderCell('Remark', colWidth),
-        _buildHeaderCell('Dispatched', colWidth),
+        _buildHeaderCell(
+          'Dispatched',
+          dispatchColWidth,
+        ), // Here, no action column!
         _buildHeaderCell('Final', narrowWidth),
         _buildHeaderCell('Created', colWidth),
-        if (_userRole == 'admin') _buildHeaderCell('Actions', narrowWidth),
+        // (No more actions column)
       ],
     );
   }
@@ -455,6 +481,7 @@ class _JobListScreenState extends State<JobListScreen> {
         _buildCell(job['serialNo'], narrowWidth),
         _buildCell(job['purchaserName'], colWidth, wrap: true),
         _buildCell(job['purchaserReference'], colWidth, wrap: true),
+        _buildCell(job['quantity'], narrowWidth),
         _buildCell(job['jobType'], narrowWidth),
         _buildCell(job['kva'], narrowWidth),
         _buildCell(job['phases'], narrowWidth),
@@ -468,7 +495,27 @@ class _JobListScreenState extends State<JobListScreen> {
         _buildCell(job['stepVoltage'], narrowWidth),
         if (_userRole == 'admin')
           _buildCell(job['remark'], colWidth, wrap: true),
-        _buildCell(_formatDate(job['dispatchDate']), colWidth),
+        // Dispatched column: show date and date selector for admin
+        SizedBox(
+          width: dispatchColWidth,
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _formatDate(job['dispatchDate']),
+                  style: const TextStyle(fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (_userRole == 'admin')
+                IconButton(
+                  icon: const Icon(Icons.calendar_today, size: 16),
+                  tooltip: 'Change Dispatch Date',
+                  onPressed: () => _selectDispatchDate(job),
+                ),
+            ],
+          ),
+        ),
         SizedBox(
           width: narrowWidth,
           child: _userRole == 'admin'
@@ -483,18 +530,12 @@ class _JobListScreenState extends State<JobListScreen> {
           colWidth,
           wrap: true,
         ),
-        if (_userRole == 'admin')
-          SizedBox(
-            width: narrowWidth,
-            child: IconButton(
-              icon: const Icon(Icons.calendar_today, size: 16),
-              onPressed: () => _selectDispatchDate(job),
-            ),
-          ),
+        // (No more actions column)
       ],
     );
   }
 
   final double colWidth = 80;
   final double narrowWidth = 60;
+  final double dispatchColWidth = 110;
 }

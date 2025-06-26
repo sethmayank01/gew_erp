@@ -40,10 +40,12 @@ class _TestReportPdfGeneratorScreenState
   String? _selectedVectorGroup;
   String? _selectedRelevantIS;
   String? _selectedJobNo;
+  String? _selectedMaterial = 'Copper'; // Default to Copper
   List<Map<String, dynamic>> _jobs = [];
 
   final List<String> _vectorGroupOptions = ['Dyn11', 'Ynd11', 'Ddo'];
   final List<String> _relevantISOptions = ['IS:2026', 'IS:1180'];
+  final List<String> _materialOptions = ['Copper', 'Aluminum'];
 
   @override
   void initState() {
@@ -67,7 +69,8 @@ class _TestReportPdfGeneratorScreenState
     _purchaserNameController.text = data['purchaserName'] ?? '';
     _purchaserRefController.text = data['purchaserReference'] ?? '';
     _serialNoController.text = data['serialNo'] ?? '';
-    // Do NOT prefill dateOfTesting, as per requirement.
+    _selectedJobNo = data['serialNo'] ?? '';
+    _dateOfTestingController.text = data['dateOfTesting'] ?? '';
     _kvaController.text = data['kva'] ?? '';
     _phasesController.text = data['phases'] ?? '';
     _hvVoltageController.text = data['hvVoltage'] ?? '';
@@ -80,6 +83,13 @@ class _TestReportPdfGeneratorScreenState
     }
     _selectedVectorGroup = data['vectorGroup'];
     _selectedRelevantIS = data['relevantIS'];
+    // Material prefill with fallback to Copper if not present or null/empty/invalid
+    final material = (data['material'] ?? '').toString();
+    if (_materialOptions.contains(material)) {
+      _selectedMaterial = material;
+    } else {
+      _selectedMaterial = 'Copper';
+    }
   }
 
   void _submitForm() {
@@ -121,6 +131,7 @@ class _TestReportPdfGeneratorScreenState
       'stepVoltage': stepVoltage,
       'hvVoltage': _hvVoltageController.text,
       'lvVoltage': _lvVoltageController.text,
+      'material': _selectedMaterial ?? 'Copper',
     };
 
     context.push(
@@ -224,6 +235,13 @@ class _TestReportPdfGeneratorScreenState
                     _buildField(_tapMaxController, 'Tapping Max'),
                     _buildField(_tapMinController, 'Tapping Min'),
                     _buildField(_stepVoltageController, 'Step Voltage'),
+                    _buildDropdownField(
+                      'Material',
+                      _materialOptions,
+                      _selectedMaterial,
+                      (val) =>
+                          setState(() => _selectedMaterial = val ?? 'Copper'),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -304,7 +322,9 @@ class _TestReportPdfGeneratorScreenState
         ),
         child: DropdownButtonHideUnderline(
           child: DropdownButton<String>(
-            value: selectedValue,
+            value: (selectedValue != null && items.contains(selectedValue))
+                ? selectedValue
+                : items.first,
             isExpanded: true,
             items: items
                 .map((val) => DropdownMenuItem(value: val, child: Text(val)))

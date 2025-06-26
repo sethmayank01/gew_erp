@@ -37,6 +37,35 @@ class _SavedReportsScreenState extends State<SavedReportsScreen> {
     });
   }
 
+  Future<void> _deleteReport(Map<String, dynamic> report) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Report'),
+        content: const Text('Are you sure you want to delete this report?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm == true) {
+      await ApiService.deleteReport(
+        report,
+      ); // Implement this in your ApiService
+      _loadReports();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Report deleted.')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final grouped = <String, List<Map<String, dynamic>>>{};
@@ -75,13 +104,18 @@ class _SavedReportsScreenState extends State<SavedReportsScreen> {
 
                 return ExpansionTile(
                   title: Text('Serial No: $serial'),
-                  children: versions.map((report) {
+                  children: versions.asMap().entries.map((verEntry) {
+                    final idx = verEntry.key;
+                    final report = verEntry.value;
                     final time = report['timestamp'] ?? '';
                     final formatted = time.toString().split('T').join(' @ ');
                     final savedBy = report['savedBy'] ?? 'Unknown';
 
+                    // Versioning: version number is 1 for oldest, increases to latest
+                    final versionNumber = versions.length - idx;
+
                     return ListTile(
-                      title: Text('Version: $formatted'),
+                      title: Text('Version $versionNumber: $formatted'),
                       subtitle: Text('Saved by: $savedBy'),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -92,7 +126,7 @@ class _SavedReportsScreenState extends State<SavedReportsScreen> {
                               context.push('/preview', extra: report);
                             },
                           ),
-                          if (_userRole == 'admin')
+                          if (_userRole == 'admin') ...[
                             IconButton(
                               icon: const Icon(Icons.edit),
                               onPressed: () {
@@ -102,14 +136,23 @@ class _SavedReportsScreenState extends State<SavedReportsScreen> {
                                 final tapCount =
                                     ((max - min) / step).round() + 1;
 
-                                context.push('/test_input_form', extra: {
-                                  'generalData': report,
-                                  'tapCount': tapCount,
-                                  'isEdit': true,
-                                  'testData': report['testData'],
-                                });
+                                context.push(
+                                  '/test_input_form',
+                                  extra: {
+                                    'generalData': report,
+                                    'tapCount': tapCount,
+                                    'isEdit': true,
+                                    'testData': report['testData'],
+                                  },
+                                );
                               },
                             ),
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.red),
+                              onPressed: () => _deleteReport(report),
+                              tooltip: 'Delete Report',
+                            ),
+                          ],
                         ],
                       ),
                     );

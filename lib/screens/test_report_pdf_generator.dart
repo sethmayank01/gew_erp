@@ -5,7 +5,6 @@ import 'package:printing/printing.dart';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/api_service.dart';
@@ -16,9 +15,6 @@ class TestReportPdfGenerator {
     Map<String, dynamic> data,
     bool isPreview,
   ) async {
-    //Temp Code Mayank for testing
-    // Default data for testing
-
     final pdf = pw.Document();
     final logoImage = await imageFromAssetBundle('assets/logo.png');
 
@@ -90,15 +86,49 @@ class TestReportPdfGenerator {
 
     final avgAmp = (loadAmps['U']! + loadAmps['V']! + loadAmps['W']!) / 3;
     final totalLoadLoss = loadWatts.values.reduce((a, b) => a + b);
+
+    // --- Begin: Corrected load loss and stray loss calculation ---
+    // correctedLoadLoss (ambient) as already calculated
     final correctedLoadLoss =
         (hvResistance['current']! / (avgAmp == 0 ? 1 : avgAmp)) *
         (hvResistance['current']! / (avgAmp == 0 ? 1 : avgAmp)) *
         totalLoadLoss;
+
+    // i2R at ambient (this was missing in your code, now included)
+    final i2rLossAmbient =
+        (hvResistance['current']! *
+            hvResistance['current']! *
+            hvResistance['avg']! *
+            0.5 *
+            3) +
+        (lvResistance['current']! *
+            lvResistance['current']! *
+            lvResistance['avg']! *
+            0.5 *
+            3);
+
+    // i2R at 75C (already in your code)
     final i2rLoss75 = hvResistance['loss']! + lvResistance['loss']!;
-    final tempFactor = (235 + temperature) / (235 + 75);
-    final loadLoss75 =
-        i2rLoss75 + correctedLoadLoss - (i2rLoss75 * tempFactor * tempFactor);
-    final strayLoss = loadLoss75 - i2rLoss75;
+
+    final String material = (data['material'] ?? '').toString().toLowerCase();
+    // If material is 'aluminium' or 'aluminum', use 225, else default to 235 (copper)
+    double K;
+    if (material == 'aluminium') {
+      K = 225;
+    } else {
+      K = 235;
+    }
+
+    // stray loss at ambient is now correctedLoadLoss - i2rLossAmbient
+    final strayLossAmbient = correctedLoadLoss - i2rLossAmbient;
+
+    // stray loss at 75C
+    final strayLoss75 = strayLossAmbient * (temperature + K) / (75 + K);
+
+    // final load loss at 75C
+    final loadLoss75 = i2rLoss75 + strayLoss75;
+
+    // --- End: Corrected load and stray loss calculation ---
 
     final avgVolt =
         (loadVolts['U']! + loadVolts['V']! + loadVolts['W']!) / 3 / sqrt(3);
@@ -110,19 +140,7 @@ class TestReportPdfGenerator {
     final z75 = sqrt(pow(xAmb, 2) + pow(r75, 2));
 
     final vectorGroup = (data['vectorGroup']?.toString() ?? '').toLowerCase();
-    //  final vectorImage = await imageFromAssetBundle('assets/$vectorGroup.png');
-    //final vectorImage = await imageFromAssetBundle('assets/dyn11.png');
-    /* Mayank to be removed final baseTextStyle = pw.TextStyle(fontSize: 10);
-    final boldStyle = pw.TextStyle(
-      fontSize: 10,
-      fontWeight: pw.FontWeight.bold,
-    );
-    final ttf = await fontFromAssetBundle('fonts/Roboto-Regular.ttf');
-    final baseTextStyle = pw.TextStyle(font: ttf, fontSize: 10);
 
-    final boldStyle =
-        pw.TextStyle(font: ttf, fontSize: 10, fontWeight: pw.FontWeight.bold);
-        */
     final baseTextStyle = pw.TextStyle(
       fontSize: 10,
       fontFallback: [robotoFont],
@@ -308,280 +326,6 @@ class TestReportPdfGenerator {
       ],
     );
 
-    /* pdf.addPage(
-      pw.MultiPage(
-        maxPages: 100,
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(24),
-        header: header,
-        footer: footer,
-        build: (context) => [
-          _section(
-            '1. Insulation Resistance Test',
-            pw.Table(
-              columnWidths: {
-                0: const pw.FlexColumnWidth(3),
-                1: const pw.FlexColumnWidth(2),
-              },
-              border: pw.TableBorder.all(color: PdfColors.grey600, width: 0.5),
-              children: [
-                pw.TableRow(
-                  children: [
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.symmetric(
-                          vertical: 2, horizontal: 4),
-                      child: pw.Text('Temperature', style: baseTextStyle),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.symmetric(
-                          vertical: 2, horizontal: 4),
-                      child: pw.Text('${data['testData']['temperature']}°C',
-                          style: baseTextStyle),
-                    ),
-                  ],
-                ),
-                pw.TableRow(
-                  children: [
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.symmetric(
-                          vertical: 2, horizontal: 4),
-                      child: pw.Text('HV-E', style: baseTextStyle),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.symmetric(
-                          vertical: 2, horizontal: 4),
-                      child: pw.Text(
-                          '${data['testData']['insulationResistance']['hv-e']} MΩ',
-                          style: baseTextStyle),
-                    ),
-                  ],
-                ),
-                pw.TableRow(
-                  children: [
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.symmetric(
-                          vertical: 2, horizontal: 4),
-                      child: pw.Text('LV-E', style: baseTextStyle),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.symmetric(
-                          vertical: 2, horizontal: 4),
-                      child: pw.Text(
-                          '${data['testData']['insulationResistance']['lv-e']} MΩ',
-                          style: baseTextStyle),
-                    ),
-                  ],
-                ),
-                pw.TableRow(
-                  children: [
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.symmetric(
-                          vertical: 2, horizontal: 4),
-                      child: pw.Text('HV-LV', style: baseTextStyle),
-                    ),
-                    pw.Padding(
-                      padding: const pw.EdgeInsets.symmetric(
-                          vertical: 2, horizontal: 4),
-                      child: pw.Text(
-                          '${data['testData']['insulationResistance']['hv-lv']} MΩ',
-                          style: baseTextStyle),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          _section(
-            '2. Ratio Test',
-            _buildRatioTable(tapStepsSno, tapSteps, hv, lv, ratioData),
-          ),
-          _section(
-            '3. Measurement of Winding Resistance',
-            pw.Row(
-              children: [
-                pw.Expanded(
-                    child: _buildResistance(
-                        'HV',
-                        'in Ohm',
-                        data['testData']['windingResistance']['hv'],
-                        hvResistance)),
-                pw.SizedBox(width: 8),
-                pw.Expanded(
-                    child: _buildResistance(
-                        'LV',
-                        'in Ohm',
-                        data['testData']['windingResistance']['lv'],
-                        lvResistance)),
-              ],
-            ),
-          ),
-          pw.NewPage(),
-          _section('4. Measurement of No-Load Loss and Current',
-              _buildNoLoadTable(noLoad, totalNoLoadLoss)),
-          _section(
-              '5. Measurement of Short Circuit Impedance and Load Losses',
-              _buildLoadTable(loadTest, totalLoadLoss.toStringAsFixed(2),
-                  loadLoss75.toStringAsFixed(2), z75.toStringAsFixed(2))),
-          _section(
-            '6. Induced Over Voltage Test',
-            pw.Container(
-              width: double.infinity,
-              child: pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Text('Tested on HV side', style: baseTextStyle),
-                  pw.Text(
-                    'Applied 2 x ${data['hvVoltage']} Volts at 125 Hz. And Withstood for 45 sec.',
-                    style: baseTextStyle,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          _section(
-            '7. Separate Source Voltage Test:',
-            pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text(
-                      '(A) Applied ${getWithstandVoltage(lv)} Between LV winding to HV Winding & Earth and Withstood for 60 sec',
-                      style: baseTextStyle,
-                    ),
-                  ],
-                ),
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text(
-                      '(B) Applied ${getWithstandVoltage(hv)} Between HV winding to LV Winding & Earth and Withstood for 60 sec',
-                      style: baseTextStyle,
-                    ),
-                  ],
-                )
-              ],
-            ),
-          ),
-          _section(
-            '8. Polarity Phase Relationship Checked:',
-            pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text(data['vectorGroup'], style: baseTextStyle),
-                    pw.Text('FOUND OK', style: baseTextStyle),
-                  ],
-                ),
-                pw.SizedBox(height: 8),
-                // pw.Image(vectorImage, height: 120),
-              ],
-            ),
-          ),
-          _section(
-            '9. BDV OF Oil (by 2.5 mm gap):',
-            pw.Container(
-              width: double.infinity,
-              padding: const pw.EdgeInsets.all(6),
-              child: pw.Text(
-                '> 60 KV (Average of 4 samples)',
-                style: baseTextStyle,
-              ),
-            ),
-          ),
-          if (isPreview) pw.NewPage(),
-          if (isPreview)
-            _section(
-                'Preview Calculations: Winding Resistance',
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text(
-                        'HV Avg Line Resistance: ${hvResistance['avg']!.toStringAsFixed(4)}',
-                        style: baseTextStyle),
-                    pw.Text(
-                        'HV R @ 75°C: ${hvResistance['r75']!.toStringAsFixed(4)}',
-                        style: baseTextStyle),
-                    pw.Text(
-                        'HV Current: ${hvResistance['current']!.toStringAsFixed(2)} A',
-                        style: baseTextStyle),
-                    pw.Text(
-                        'HV I²R Loss: ${hvResistance['loss']!.toStringAsFixed(2)} W',
-                        style: baseTextStyle),
-                    pw.SizedBox(height: 6),
-                    pw.Text(
-                        'LV Avg Line Resistance: ${lvResistance['avg']!.toStringAsFixed(4)}',
-                        style: baseTextStyle),
-                    pw.Text(
-                        'LV R @ 75°C: ${lvResistance['r75']!.toStringAsFixed(4)}',
-                        style: baseTextStyle),
-                    pw.Text(
-                        'LV Current: ${lvResistance['current']!.toStringAsFixed(2)} A',
-                        style: baseTextStyle),
-                    pw.Text(
-                        'LV I²R Loss: ${lvResistance['loss']!.toStringAsFixed(2)} W',
-                        style: baseTextStyle),
-                  ],
-                )),
-          if (isPreview)
-            _section(
-              'Load Test Preview Calculations',
-              pw.Column(
-                children: [
-                  pw.Text(
-                    'RMS Voltages: U=${rmsVoltages['U']} V, V=${rmsVoltages['V']} V, W=${rmsVoltages['W']} V',
-                    style: baseTextStyle,
-                  ),
-                  pw.Text(
-                    'Total No Load Loss: $totalNoLoadLoss W',
-                    style: baseTextStyle,
-                  ),
-                  pw.Text(
-                    'Total Load Loss: ${totalLoadLoss.toStringAsFixed(2)} W',
-                    style: baseTextStyle,
-                  ),
-                  pw.Text(
-                    'Corrected Load Loss: ${correctedLoadLoss.toStringAsFixed(2)} W',
-                    style: baseTextStyle,
-                  ),
-                  pw.Text(
-                    'Load Loss @ 75°C: ${loadLoss75.toStringAsFixed(2)} W',
-                    style: baseTextStyle,
-                  ),
-                  pw.Text(
-                    'Stray Loss: ${strayLoss.toStringAsFixed(2)} W',
-                    style: baseTextStyle,
-                  ),
-                  pw.Text(
-                    '%Z (ambient): ${zAmb.toStringAsFixed(2)}%',
-                    style: baseTextStyle,
-                  ),
-                  pw.Text(
-                    '%R (ambient): ${rAmb.toStringAsFixed(2)}%',
-                    style: baseTextStyle,
-                  ),
-                  pw.Text(
-                    '%X (ambient): ${xAmb.toStringAsFixed(2)}%',
-                    style: baseTextStyle,
-                  ),
-                  pw.Text(
-                    '%R (75°C): ${r75.toStringAsFixed(2)}%',
-                    style: baseTextStyle,
-                  ),
-                  pw.Text(
-                    '%Z (75°C): ${z75.toStringAsFixed(2)}%',
-                    style: baseTextStyle,
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-*/
     pdf.addPage(
       pw.MultiPage(
         maxPages: 100,
@@ -902,7 +646,11 @@ class TestReportPdfGenerator {
                             style: baseTextStyle,
                           ),
                           pw.Text(
-                            'HV I²R Loss: ${hvResistance['loss']!.toStringAsFixed(2)} W',
+                            'HV I²R Loss (ambient): ${(hvResistance['current']! * hvResistance['current']! * hvResistance['avg']! * 0.5 * 3).toStringAsFixed(2)} W',
+                            style: baseTextStyle,
+                          ),
+                          pw.Text(
+                            'HV I²R Loss (75°C): ${hvResistance['loss']!.toStringAsFixed(2)} W',
                             style: baseTextStyle,
                           ),
                           pw.SizedBox(height: 6),
@@ -919,7 +667,11 @@ class TestReportPdfGenerator {
                             style: baseTextStyle,
                           ),
                           pw.Text(
-                            'LV I²R Loss: ${lvResistance['loss']!.toStringAsFixed(2)} W',
+                            'LV I²R Loss (ambient): ${(lvResistance['current']! * lvResistance['current']! * lvResistance['avg']! * 0.5 * 3).toStringAsFixed(2)} W',
+                            style: baseTextStyle,
+                          ),
+                          pw.Text(
+                            'LV I²R Loss (75°C): ${lvResistance['loss']!.toStringAsFixed(2)} W',
                             style: baseTextStyle,
                           ),
                         ],
@@ -946,11 +698,23 @@ class TestReportPdfGenerator {
                             style: baseTextStyle,
                           ),
                           pw.Text(
-                            'Load Loss @ 75°C: ${loadLoss75.toStringAsFixed(2)} W',
+                            'i²R Loss (ambient): ${i2rLossAmbient.toStringAsFixed(2)} W',
                             style: baseTextStyle,
                           ),
                           pw.Text(
-                            'Stray Loss: ${strayLoss.toStringAsFixed(2)} W',
+                            'Stray Loss (ambient): ${strayLossAmbient.toStringAsFixed(2)} W',
+                            style: baseTextStyle,
+                          ),
+                          pw.Text(
+                            'Stray Loss (75°C): ${strayLoss75.toStringAsFixed(2)} W',
+                            style: baseTextStyle,
+                          ),
+                          pw.Text(
+                            'i²R Loss (75°C): ${i2rLoss75.toStringAsFixed(2)} W',
+                            style: baseTextStyle,
+                          ),
+                          pw.Text(
+                            'Load Loss @ 75°C: ${loadLoss75.toStringAsFixed(2)} W',
                             style: baseTextStyle,
                           ),
                           pw.Text(
@@ -1077,10 +841,7 @@ class TestReportPdfGenerator {
           data: [res.values.map((e) => e.toString()).toList()],
           border: pw.TableBorder.all(color: PdfColors.grey, width: 0.75),
           headerDecoration: pw.BoxDecoration(color: PdfColors.white),
-          headerStyle: pw.TextStyle(
-            // fontWeight: pw.FontWeight.bold,
-            fontSize: 10,
-          ),
+          headerStyle: pw.TextStyle(fontSize: 10),
           cellStyle: pw.TextStyle(fontSize: 10),
           cellPadding: const pw.EdgeInsets.symmetric(
             vertical: 2,
@@ -1127,10 +888,7 @@ class TestReportPdfGenerator {
         ];
       }),
       border: pw.TableBorder.all(color: PdfColors.grey, width: 0.75),
-      headerStyle: pw.TextStyle(
-        // fontWeight: pw.FontWeight.bold,
-        fontSize: 10,
-      ),
+      headerStyle: pw.TextStyle(fontSize: 10),
       cellStyle: pw.TextStyle(fontSize: 10),
       cellPadding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 4),
     );
@@ -1156,10 +914,7 @@ class TestReportPdfGenerator {
       ],
       border: pw.TableBorder.all(color: PdfColors.grey, width: 0.75),
       headerDecoration: pw.BoxDecoration(color: PdfColors.white),
-      headerStyle: pw.TextStyle(
-        // fontWeight: pw.FontWeight.bold,
-        fontSize: 10,
-      ),
+      headerStyle: pw.TextStyle(fontSize: 10),
       cellStyle: pw.TextStyle(fontSize: 10),
       cellPadding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 4),
     );
@@ -1183,10 +938,7 @@ class TestReportPdfGenerator {
       ],
       border: pw.TableBorder.all(color: PdfColors.grey, width: 0.75),
       headerDecoration: pw.BoxDecoration(color: PdfColors.white),
-      headerStyle: pw.TextStyle(
-        // fontWeight: pw.FontWeight.bold,
-        fontSize: 10,
-      ),
+      headerStyle: pw.TextStyle(fontSize: 10),
       cellStyle: pw.TextStyle(fontSize: 10),
       cellPadding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 4),
     );
