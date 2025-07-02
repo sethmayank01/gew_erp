@@ -3,6 +3,7 @@ import '../services/api_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'dart:math';
+import 'package:dropdown_search/dropdown_search.dart'; // <-- Add this package to pubspec.yaml
 
 class OutgoingMaterialScreen extends StatefulWidget {
   const OutgoingMaterialScreen({super.key});
@@ -70,6 +71,12 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
   Future<void> _loadInitialData() async {
     final jobs = await ApiService.getJobs();
     final materials = await ApiService.getMaterials();
+    // Sort materials alphabetically by type-subtype
+    materials.sort((a, b) {
+      final aKey = (a['type'] ?? '') + '-' + (a['subtype'] ?? '');
+      final bKey = (b['type'] ?? '') + '-' + (b['subtype'] ?? '');
+      return aKey.toLowerCase().compareTo(bKey.toLowerCase());
+    });
     setState(() {
       _jobs = List<Map<String, dynamic>>.from(
         jobs.where((job) => job['isFinal'] != true),
@@ -169,11 +176,16 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
     if (_selectedJob == null || _selectedMaterial == null || issueQty <= 0)
       return;
 
-    // Validation: must not issue more than indentQty and availableQty
-    if (issueQty > _indentQty) {
+    // Calculate 2% tolerance for indent quantity
+    final double indentQtyWithTolerance = _indentQty * 1.02;
+
+    // Validation: must not issue more than indentQtyWithTolerance and availableQty
+    if (issueQty > indentQtyWithTolerance) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Cannot issue more than indent quantity ($_indentQty)'),
+          content: Text(
+            'Cannot issue more than 2% above indent quantity (${indentQtyWithTolerance.toStringAsFixed(2)})',
+          ),
         ),
       );
       return;
@@ -212,6 +224,8 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
       final updateResult = await ApiService.updateStockQuantity(
         data: entry,
         quantity: takeQty,
+        price: 0.0,
+        editFlag: false,
       );
       if (updateResult != true) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -273,7 +287,6 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
   }
 
   Widget _buildOutgoingTable() {
-    // Table headers
     final columns = [
       'Job',
       'Material',
@@ -288,7 +301,6 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    // Search filter
     final filteredOutgoingList = _outgoingList.where((entry) {
       final search = _searchQuery;
       if (search.isEmpty) return true;
@@ -309,7 +321,6 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
           ),
           const SizedBox(height: 12),
-          // Always show search box:
           Padding(
             padding: const EdgeInsets.only(bottom: 8.0),
             child: TextField(
@@ -373,6 +384,14 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Prepare material dropdown items sorted and as a string for search
+    final materialStringList = _materials
+        .map((m) => '${m['type'] ?? ''} - ${m['subtype'] ?? ''}')
+        .toList();
+
+    // Calculate 2% tolerance for indent quantity
+    final double indentQtyWithTolerance = _indentQty * 1.02;
+
     return Scaffold(
       appBar: AppBar(title: const Text("Issue Material to Job")),
       body: _isLoading
@@ -408,27 +427,46 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                             val == null ? 'Please select a job' : null,
                       ),
                       const SizedBox(height: 16),
-                      DropdownButtonFormField<Map<String, dynamic>>(
-                        decoration: const InputDecoration(
-                          labelText: 'Select Material',
+                      // Updated Material Dropdown with search and alphabetic sort
+                      DropdownSearch<String>(
+                        items: materialStringList,
+                        selectedItem: _selectedMaterial != null
+                            ? '${_selectedMaterial!['type'] ?? ''} - ${_selectedMaterial!['subtype'] ?? ''}'
+                            : null,
+                        dropdownDecoratorProps: const DropDownDecoratorProps(
+                          dropdownSearchDecoration: InputDecoration(
+                            labelText: "Select Material",
+                            border: OutlineInputBorder(),
+                          ),
                         ),
-                        value: _selectedMaterial,
-                        items: _materials.map((mat) {
-                          final matKey = mat['type'] + '-' + mat['subtype'];
-                          return DropdownMenuItem(
-                            value: mat,
-                            child: Text(matKey),
-                          );
-                        }).toList(),
-                        onChanged: (val) async {
-                          await _onMaterialSelected(val);
-                        },
+                        popupProps: const PopupProps.menu(
+                          showSearchBox: true,
+                          searchFieldProps: TextFieldProps(
+                            decoration: InputDecoration(
+                              hintText: "Search material...",
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
                         validator: (val) =>
                             val == null ? 'Please select a material' : null,
+                        onChanged: (val) async {
+                          var mat = _materials.firstWhere(
+                            (m) =>
+                                '${m['type'] ?? ''} - ${m['subtype'] ?? ''}' ==
+                                val,
+                            orElse: () => {},
+                          );
+                          if (mat.isNotEmpty) {
+                            await _onMaterialSelected(mat);
+                          }
+                        },
                       ),
                       const SizedBox(height: 16),
                       Text('Available Qty (FIFO): $_availableQty'),
-                      Text('Indent Qty: $_indentQty'),
+                      Text(
+                        'Indent Qty: $_indentQty (Allowed upto ${indentQtyWithTolerance.toStringAsFixed(2)})',
+                      ),
                       const SizedBox(height: 16),
                       TextFormField(
                         controller: _issueQtyController,
@@ -446,8 +484,8 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                           if (parsed <= 0) return 'Quantity must be > 0';
                           if (parsed > _availableQty)
                             return 'Cannot issue more than available stock ($_availableQty)';
-                          if (parsed > _indentQty)
-                            return 'Cannot issue more than indent quantity ($_indentQty)';
+                          if (parsed > indentQtyWithTolerance)
+                            return 'Cannot issue more than 2% above indent quantity (${indentQtyWithTolerance.toStringAsFixed(2)})';
                           return null;
                         },
                       ),

@@ -15,7 +15,7 @@ class _StockViewScreenState extends State<StockViewScreen> {
   List<Map<String, dynamic>> _jobStock = [];
   List<String> _jobNumbers = [];
   Map<String, List<Map<String, dynamic>>> _allIndentStocks = {};
-  Map<String, double> _indentQtyMap = {}; // New: stores indentQty per group key
+  Map<String, double> _indentQtyMap = {};
   String _role = 'user';
   bool _isLoading = false;
   Map<String, bool> _expandedGeneralKeys = {};
@@ -41,7 +41,7 @@ class _StockViewScreenState extends State<StockViewScreen> {
     await _loadUser();
     await _loadStock();
     await _loadJobs();
-    await _loadIndentQtys(); // new
+    await _loadIndentQtys();
   }
 
   Future<void> _loadUser() async {
@@ -76,7 +76,6 @@ class _StockViewScreenState extends State<StockViewScreen> {
 
   Future<void> _loadIndentQtys() async {
     try {
-      // This will be List<List<dynamic>>
       final rawList = await ApiService.getIndentStockList();
       Map<String, double> qtyMap = {};
       for (var row in rawList) {
@@ -174,6 +173,87 @@ class _StockViewScreenState extends State<StockViewScreen> {
     });
   }
 
+  // New: Edit dialog for stock entries
+  Future<void> _editStockEntry(
+    Map<String, dynamic> entry,
+    bool isJobStock,
+  ) async {
+    final qtyController = TextEditingController(
+      text: entry['quantity']?.toString() ?? '',
+    );
+    final priceController = TextEditingController(
+      text: entry['price']?.toString() ?? '',
+    );
+    bool updated = false;
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit Stock Entry'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: qtyController,
+              decoration: const InputDecoration(labelText: 'Quantity'),
+              keyboardType: TextInputType.numberWithOptions(decimal: true),
+            ),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: priceController,
+              decoration: const InputDecoration(labelText: 'Price'),
+              keyboardType: TextInputType.numberWithOptions(decimal: true),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final newQty = double.tryParse(qtyController.text) ?? 0.0;
+              final newPrice = double.tryParse(priceController.text) ?? 0.0;
+              Map<String, dynamic> updatedEntry = Map.of(entry);
+              updatedEntry['quantity'] = newQty;
+              updatedEntry['price'] = newPrice;
+              // Call API to update stock entry (you should implement updateStockQuantity accordingly)
+              final result = await ApiService.updateStockQuantity(
+                data: updatedEntry,
+                quantity: newQty,
+                price: newPrice,
+                editFlag: true,
+              );
+              if (result == true) {
+                setState(() {
+                  entry['quantity'] = newQty;
+                  entry['price'] = newPrice;
+                });
+                updated = true;
+                Navigator.pop(context);
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text('Stock entry updated')));
+              } else {
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text(result.toString())));
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (updated) {
+      await _loadStock();
+      await _loadJobs();
+      await _loadIndentQtys();
+    }
+  }
+
   Widget _buildGroupedStockSection({
     required String sectionTitle,
     required Map<String, Map<String, dynamic>> grouped,
@@ -233,7 +313,6 @@ class _StockViewScreenState extends State<StockViewScreen> {
                           'Entries:',
                           style: TextStyle(fontWeight: FontWeight.bold),
                         ),
-                        // Sorting and mapping entries:
                         ...(() {
                           final entries = group['entries'];
                           List<Map<String, dynamic>> sortedEntries =
@@ -277,49 +356,71 @@ class _StockViewScreenState extends State<StockViewScreen> {
                                   ? Text('Note: ${entry['note']}')
                                   : null,
                               trailing: (_role == 'admin')
-                                  ? IconButton(
-                                      icon: Icon(
-                                        Icons.delete,
-                                        color: Colors.red,
-                                      ),
-                                      onPressed: () async {
-                                        final confirm = await showDialog<bool>(
-                                          context: context,
-                                          builder: (context) => AlertDialog(
-                                            title: const Text(
-                                              "Confirm Deletion",
-                                            ),
-                                            content: const Text(
-                                              "Delete this entry?",
-                                            ),
-                                            actions: [
-                                              TextButton(
-                                                onPressed: () => Navigator.of(
-                                                  context,
-                                                ).pop(false),
-                                                child: const Text("Cancel"),
-                                              ),
-                                              TextButton(
-                                                onPressed: () => Navigator.of(
-                                                  context,
-                                                ).pop(true),
-                                                child: const Text(
-                                                  "Delete",
-                                                  style: TextStyle(
-                                                    color: Colors.red,
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
+                                  ? Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.edit,
+                                            color: Colors.blue,
                                           ),
-                                        );
-                                        if (confirm == true) {
-                                          await _deleteStockEntry(
+                                          onPressed: () => _editStockEntry(
                                             entry,
                                             isJobStock,
-                                          );
-                                        }
-                                      },
+                                          ),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.delete,
+                                            color: Colors.red,
+                                          ),
+                                          onPressed: () async {
+                                            final confirm =
+                                                await showDialog<bool>(
+                                                  context: context,
+                                                  builder: (context) =>
+                                                      AlertDialog(
+                                                        title: const Text(
+                                                          "Confirm Deletion",
+                                                        ),
+                                                        content: const Text(
+                                                          "Delete this entry?",
+                                                        ),
+                                                        actions: [
+                                                          TextButton(
+                                                            onPressed: () =>
+                                                                Navigator.of(
+                                                                  context,
+                                                                ).pop(false),
+                                                            child: const Text(
+                                                              "Cancel",
+                                                            ),
+                                                          ),
+                                                          TextButton(
+                                                            onPressed: () =>
+                                                                Navigator.of(
+                                                                  context,
+                                                                ).pop(true),
+                                                            child: const Text(
+                                                              "Delete",
+                                                              style: TextStyle(
+                                                                color:
+                                                                    Colors.red,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                );
+                                            if (confirm == true) {
+                                              await _deleteStockEntry(
+                                                entry,
+                                                isJobStock,
+                                              );
+                                            }
+                                          },
+                                        ),
+                                      ],
                                     )
                                   : null,
                             );

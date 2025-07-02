@@ -32,7 +32,6 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
   String _role = '';
   String _username = '';
 
-  // Search feature for entries
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -141,7 +140,6 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
     };
 
     await ApiService.submitMaterialIncoming(data);
-    await ApiService.addStock(data: data);
     await _loadEntries();
     ScaffoldMessenger.of(
       context,
@@ -168,18 +166,173 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
     }
   }
 
+  Future<void> _showEditDialog(Map<String, dynamic> entry) async {
+    final qtyController = TextEditingController(
+      text: entry['quantity']?.toString() ?? '',
+    );
+    final priceController = TextEditingController(
+      text: entry['price']?.toString() ?? '',
+    );
+    final makeController = TextEditingController(
+      text: entry['make']?.toString() ?? '',
+    );
+    final descController = TextEditingController(
+      text: entry['description']?.toString() ?? '',
+    );
+    final invoiceController = TextEditingController(
+      text: entry['invoice']?.toString() ?? '',
+    );
+    String? selectedMaterial = entry['material'];
+    String? selectedJob = entry['serialNo'];
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Edit Incoming Entry'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownSearch<String>(
+                  items: _materials,
+                  selectedItem: selectedMaterial,
+                  filterFn: (item, filter) {
+                    if (item == null || filter == null) return false;
+                    final filterWords = filter
+                        .toLowerCase()
+                        .split(' ')
+                        .where((w) => w.isNotEmpty);
+                    final lowerItem = item.toLowerCase();
+                    return filterWords.every(
+                      (word) => lowerItem.contains(word),
+                    );
+                  },
+                  dropdownDecoratorProps: const DropDownDecoratorProps(
+                    dropdownSearchDecoration: InputDecoration(
+                      labelText: "Material Type",
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  popupProps: const PopupProps.menu(
+                    showSearchBox: true,
+                    searchFieldProps: TextFieldProps(
+                      decoration: InputDecoration(
+                        hintText: "Search type or subtype...",
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  onChanged: (val) {
+                    selectedMaterial = val;
+                  },
+                ),
+                const SizedBox(height: 8),
+                if (entry['jobSpecific'] == true)
+                  DropdownSearch<String>(
+                    items: List<String>.from(_jobNumbers),
+                    selectedItem: selectedJob,
+                    dropdownDecoratorProps: const DropDownDecoratorProps(
+                      dropdownSearchDecoration: InputDecoration(
+                        labelText: "Job Number",
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    popupProps: const PopupProps.menu(
+                      showSearchBox: true,
+                      searchFieldProps: TextFieldProps(
+                        decoration: InputDecoration(
+                          hintText: "Search...",
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
+                    onChanged: (val) => selectedJob = val,
+                  ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: qtyController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(labelText: 'Quantity'),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: priceController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(labelText: 'Price'),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: makeController,
+                  decoration: const InputDecoration(labelText: 'Make'),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: descController,
+                  decoration: const InputDecoration(labelText: 'Description'),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: invoiceController,
+                  decoration: const InputDecoration(
+                    labelText: 'Invoice Number',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final updatedEntry = {
+                  ...entry,
+                  'material': selectedMaterial,
+                  'quantity': qtyController.text,
+                  'price': priceController.text,
+                  'make': makeController.text,
+                  'description': descController.text,
+                  'invoice': invoiceController.text,
+                  if (entry['jobSpecific'] == true) 'serialNo': selectedJob,
+                };
+                await ApiService.updateMaterialIncomingEntry(
+                  entryId: entry['id'],
+                  data: updatedEntry,
+                );
+                Navigator.pop(context);
+                await _loadEntries();
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text("Entry updated")));
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Filter entries based on search
     final filteredEntries = _entries.where((entry) {
       final search = _searchQuery;
       if (search.isEmpty) return true;
-      return (entry['material'] ?? '').toString().toLowerCase().contains(
-            search,
-          ) ||
-          (entry['serialNo'] ?? '').toString().toLowerCase().contains(search) ||
-          (entry['user'] ?? '').toString().toLowerCase().contains(search) ||
-          (entry['invoice'] ?? '').toString().toLowerCase().contains(search);
+      final fieldsToSearch = [
+        (entry['type'] ?? '').toString().toLowerCase(),
+        (entry['subtype'] ?? '').toString().toLowerCase(),
+        (entry['make'] ?? '').toString().toLowerCase(),
+        (entry['invoice'] ?? '').toString().toLowerCase(),
+        (entry['serialNo'] ?? '').toString().toLowerCase(),
+      ];
+      return fieldsToSearch.any((field) => field.contains(search));
     }).toList();
 
     return Scaffold(
@@ -198,6 +351,17 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                         child: DropdownSearch<String>(
                           selectedItem: _selectedMaterial,
                           items: _materials,
+                          filterFn: (item, filter) {
+                            if (item == null || filter == null) return false;
+                            final filterWords = filter
+                                .toLowerCase()
+                                .split(' ')
+                                .where((w) => w.isNotEmpty);
+                            final lowerItem = item.toLowerCase();
+                            return filterWords.every(
+                              (word) => lowerItem.contains(word),
+                            );
+                          },
                           dropdownDecoratorProps: const DropDownDecoratorProps(
                             dropdownSearchDecoration: InputDecoration(
                               labelText: "Material Type",
@@ -208,7 +372,7 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                             showSearchBox: true,
                             searchFieldProps: TextFieldProps(
                               decoration: InputDecoration(
-                                hintText: "Search...",
+                                hintText: "Search type or subtype...",
                                 border: OutlineInputBorder(),
                               ),
                             ),
@@ -222,7 +386,7 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                         Expanded(
                           child: DropdownSearch<String>(
                             selectedItem: _selectedJob,
-                            items: _jobNumbers..sort(),
+                            items: List<String>.from(_jobNumbers),
                             dropdownDecoratorProps:
                                 const DropDownDecoratorProps(
                                   dropdownSearchDecoration: InputDecoration(
@@ -352,15 +516,46 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                 child: ListTile(
                   title: Text(entry['material'] ?? ''),
                   subtitle: Text(
-                    "Qty: ${entry['quantity']} | Serial No: ${entry['serialNo']} | Price: ${entry['price']} | Make: ${entry['make']} | Invoice No: ${entry['invoice']} | Entry Date: ${entry['entryDate']} | User: ${entry['user']}",
+                    "Qty: ${entry['quantity']} | Serial No: ${entry['serialNo']} | Price: ${entry['price']} | Make: ${entry['make']} | Invoice No: ${entry['invoice']} | Entry Date: ${entry['entryDate']} | User: ${entry['user']} | Approved By: ${entry['approved_by']} | Approved: ${entry['approved'] == true ? 'Yes' : 'No'}",
                   ),
-                  trailing: (_role == "admin" || entry['user'] == _username)
-                      ? IconButton(
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if ((_role == "admin" || entry['user'] == _username) &&
+                          entry['approved'] != true)
+                        IconButton(
+                          icon: const Icon(Icons.edit, color: Colors.blue),
+                          onPressed: () => _showEditDialog(entry),
+                        ),
+                      if ((_role == "admin" || entry['user'] == _username) &&
+                          entry['approved'] != true)
+                        IconButton(
                           icon: const Icon(Icons.delete, color: Colors.red),
                           onPressed: () =>
                               _deleteEntry(entry['id'], entry['user']),
-                        )
-                      : null,
+                        ),
+                      if (_role == "admin" && entry['approved'] != true)
+                        IconButton(
+                          icon: const Icon(Icons.check, color: Colors.green),
+                          tooltip: "Approve",
+                          onPressed: () async {
+                            await ApiService.approveMaterialEntry(
+                              entryId: entry['id'],
+                              approver: _username,
+                            );
+                            await ApiService.addStock(data: entry);
+                            await _loadEntries();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  "Entry approved and added to stock",
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),

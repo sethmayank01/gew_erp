@@ -1,12 +1,15 @@
 // Flutter: api_service.dart
-// Updated to use correct HTTP methods to match Flask backend
+// Updated for incoming approval workflow and frontend/backend sync
 
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 class ApiService {
-  static const String lanUrl = 'http://192.168.2.160:5000';
+  //static const String lanUrl = 'http://192.168.2.205:5000';
+  static const String lanUrl = 'http://192.168.2.205:5000';
+  static const String versionUrl = 'http://192.168.2.205:8000/version.json';
 
   static Future<http.Response> _sendRequest(
     String method,
@@ -17,7 +20,6 @@ class ApiService {
     Uri uri = Uri.parse(
       '$lanUrl$endpoint',
     ).replace(queryParameters: queryParams);
-
     return await _send(method, uri, body);
   }
 
@@ -56,6 +58,19 @@ class ApiService {
       body: {'username': username, 'password': password},
     );
     return res.statusCode == 200 ? jsonDecode(res.body) : null;
+  }
+
+  static Future<Map<String, dynamic>?> fetchVersionInfo() async {
+    final res = await http.get(Uri.parse(versionUrl));
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body);
+    }
+    return null;
+  }
+
+  static Future<String> getCurrentAppVersion() async {
+    final info = await PackageInfo.fromPlatform();
+    return info.version;
   }
 
   static Future<void> addUser(
@@ -135,14 +150,17 @@ class ApiService {
     return jsonDecode(res.body);
   }
 
+  /// UPDATED: Set approval fields on creation. Don't add to stock here.
   static Future<void> submitMaterialIncoming(Map<String, dynamic> data) async {
     data['id'] ??= const Uuid().v4();
+    data['approved'] = false;
+    data['approved_by'] = null;
+    data['approved_at'] = null;
     await _sendRequest('POST', '/incoming_materials', body: data);
   }
 
   static Future<bool> saveOutgoingMaterial(Map<String, dynamic> data) async {
     final res = await _sendRequest('POST', '/outgoing_materials', body: data);
-
     return res.statusCode == 200;
   }
 
@@ -166,8 +184,6 @@ class ApiService {
   }
 
   static Future<bool> removeStock({required Map<String, dynamic> data}) async {
-    //Delete the stock entry for which material is deleted
-    //Add the stock entry per invoice/lot
     final res = await _sendRequest(
       'POST',
       '/stock/delete',
@@ -177,7 +193,6 @@ class ApiService {
   }
 
   static Future<bool> addStock({required Map<String, dynamic> data}) async {
-    //Add the stock entry per invoice/lot
     final res = await _sendRequest('POST', '/stock/add', body: {'data': data});
     return res.statusCode == 200;
   }
@@ -185,16 +200,22 @@ class ApiService {
   static Future<dynamic> updateStockQuantity({
     required Map<String, dynamic> data,
     required double quantity,
+    required double price,
+    required bool editFlag,
   }) async {
     final res = await _sendRequest(
       'POST',
       '/stock/update',
-      body: {'data': data, 'quantity': quantity},
+      body: {
+        'data': data,
+        'quantity': quantity,
+        'editFlag': editFlag,
+        'price': price,
+      },
     );
     if (res.statusCode == 200) {
       return true;
     } else {
-      // Try to extract a message
       try {
         final responseBody = jsonDecode(res.body);
         final errorMessage =
@@ -310,11 +331,29 @@ class ApiService {
     }
   }
 
+  static Future<String> updateExistingJobIndent({
+    required Map<String, dynamic> data,
+  }) async {
+    try {
+      final res = await _sendRequest(
+        'POST',
+        '/job_indents/update_existing',
+        body: data,
+      );
+      if (res.statusCode == 200) {
+        return "Success";
+      } else {
+        return 'Error: ${_extractError(res)}';
+      }
+    } catch (e) {
+      return 'Error: $e';
+    }
+  }
+
   static Future<String> issueMaterial(Map<String, dynamic> data) async {
     final jobIndentResult = await updateJobIndent(data: data);
 
     if (jobIndentResult != 'Success') {
-      // Skip updating stock and return the error message
       return 'Job Indent Failed: $jobIndentResult';
     }
     try {
@@ -322,6 +361,36 @@ class ApiService {
       return 'Success';
     } catch (e) {
       return 'Error updating stock: $e';
+    }
+  }
+
+  /// Approve an incoming material entry (admin only).
+  static Future<void> approveMaterialEntry({
+    required String entryId,
+    required String approver,
+  }) async {
+    final res = await _sendRequest(
+      'POST',
+      '/incoming_materials/$entryId/approve',
+      body: {'approver': approver},
+    );
+    if (res.statusCode != 200) {
+      throw Exception('Approval failed: ${_extractError(res)}');
+    }
+  }
+
+  /// Edit an incoming entry before approval (admin or creator).
+  static Future<void> updateMaterialIncomingEntry({
+    required String entryId,
+    required Map<String, dynamic> data,
+  }) async {
+    final res = await _sendRequest(
+      'PUT',
+      '/incoming_materials/$entryId',
+      body: data,
+    );
+    if (res.statusCode != 200) {
+      throw Exception('Update failed: ${_extractError(res)}');
     }
   }
 

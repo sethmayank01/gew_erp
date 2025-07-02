@@ -16,7 +16,7 @@ class _MaterialListScreenState extends State<MaterialListScreen> {
   final _minQtyController = TextEditingController();
   final _searchController = TextEditingController();
 
-  final List<String> _units = ['Nos', 'Kgs', 'Sets', 'Mtrs'];
+  final List<String> _units = ['Nos', 'Kgs', 'Sets', 'Mtrs', 'Ltrs'];
   final List<String> _categories = [
     'CCA',
     'Tanking',
