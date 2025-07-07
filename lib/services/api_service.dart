@@ -8,7 +8,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 class ApiService {
   //static const String lanUrl = 'http://192.168.2.205:5000';
-  static const String lanUrl = 'http://192.168.2.205:5000';
+  static const String lanUrl = 'http://192.168.2.205:5005';
   static const String versionUrl = 'http://192.168.2.205:8000/version.json';
 
   static Future<http.Response> _sendRequest(

@@ -1014,7 +1014,9 @@ class _TestReportPreviewScreenState extends State<TestReportPreviewScreen> {
                       'TestReport_${widget.data['serialNo'] ?? 'Report'}.pdf';
                   final file = File('${dir.path}/$fileName');
                   await file.writeAsBytes(bytes);
-                  await ApiService.saveReport(widget.data);
+                  final Map<String, dynamic> reportToSave = {...widget.data};
+                  reportToSave['timestamp'] = DateTime.now().toIso8601String();
+                  await ApiService.saveReport(reportToSave);
 
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
