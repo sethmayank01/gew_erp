@@ -27,6 +27,7 @@ class _SecondInputScreenState extends State<SecondInputScreen> {
   final _hvEController = TextEditingController();
   final _lvEController = TextEditingController();
   final _hvLvController = TextEditingController();
+  final _remarkController = TextEditingController();
 
   late List<Map<String, TextEditingController>> _ratioInputs;
 
@@ -49,12 +50,13 @@ class _SecondInputScreenState extends State<SecondInputScreen> {
   void initState() {
     super.initState();
     _ratioInputs = List.generate(
-        widget.tapCount,
-        (_) => {
-              'U': TextEditingController(),
-              'V': TextEditingController(),
-              'W': TextEditingController(),
-            });
+      widget.tapCount,
+      (_) => {
+        'U': TextEditingController(),
+        'V': TextEditingController(),
+        'W': TextEditingController(),
+      },
+    );
 
     for (var phase in ['U', 'V', 'W']) {
       _noLoadTest[phase]!['amp'] = TextEditingController();
@@ -101,6 +103,9 @@ class _SecondInputScreenState extends State<SecondInputScreen> {
         _loadTest[phase]!['volt'].text = test['loadTest'][phase]['volt'] ?? '';
         _loadTest[phase]!['watt'].text = test['loadTest'][phase]['watt'] ?? '';
       }
+      // Prefill remark if present
+
+      _remarkController.text = widget.generalData['remark'] ?? '';
     }
   }
 
@@ -110,6 +115,7 @@ class _SecondInputScreenState extends State<SecondInputScreen> {
     _hvEController.dispose();
     _lvEController.dispose();
     _hvLvController.dispose();
+    _remarkController.dispose();
 
     for (var map in _ratioInputs) {
       map.forEach((_, ctrl) => ctrl.dispose());
@@ -119,22 +125,81 @@ class _SecondInputScreenState extends State<SecondInputScreen> {
     _lvResControllers.values.forEach((c) => c.dispose());
 
     for (var phase in ['U', 'V', 'W']) {
-      _noLoadTest[phase]!
-          .values
-          .forEach((c) => (c as TextEditingController).dispose());
-      _loadTest[phase]!
-          .values
-          .forEach((c) => (c as TextEditingController).dispose());
+      _noLoadTest[phase]!.values.forEach(
+        (c) => (c as TextEditingController).dispose(),
+      );
+      _loadTest[phase]!.values.forEach(
+        (c) => (c as TextEditingController).dispose(),
+      );
     }
 
     super.dispose();
   }
 
   Map<String, String> _extractTestValues(Map map) => {
-        'amp': map['amp']!.text,
-        'volt': map['volt']!.text,
-        'watt': map['watt']!.text,
-      };
+    'amp': map['amp']!.text,
+    'volt': map['volt']!.text,
+    'watt': map['watt']!.text,
+  };
+
+  Future<void> _saveReport() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final testData = {
+      'temperature': _temperatureController.text,
+      'insulationResistance': {
+        'hv-e': _hvEController.text,
+        'lv-e': _lvEController.text,
+        'hv-lv': _hvLvController.text,
+      },
+      'ratios': _ratioInputs
+          .map(
+            (map) => {
+              'U': map['U']!.text,
+              'V': map['V']!.text,
+              'W': map['W']!.text,
+            },
+          )
+          .toList(),
+      'windingResistance': {
+        'hv': {
+          '1U1V': _hvResControllers['1U1V']!.text,
+          '1V1W': _hvResControllers['1V1W']!.text,
+          '1W1U': _hvResControllers['1W1U']!.text,
+        },
+        'lv': {
+          '2u2v': _lvResControllers['2u2v']!.text,
+          '2v2w': _lvResControllers['2v2w']!.text,
+          '2w2u': _lvResControllers['2w2u']!.text,
+        },
+      },
+      'noLoadTest': {
+        'U': _extractTestValues(_noLoadTest['U']!),
+        'V': _extractTestValues(_noLoadTest['V']!),
+        'W': _extractTestValues(_noLoadTest['W']!),
+      },
+      'loadTest': {
+        'U': _extractTestValues(_loadTest['U']!),
+        'V': _extractTestValues(_loadTest['V']!),
+        'W': _extractTestValues(_loadTest['W']!),
+      },
+    };
+    final prefs = await SharedPreferences.getInstance();
+    final username = prefs.getString('username') ?? 'Unknown';
+    final fullData = {
+      ...widget.generalData,
+      'testData': testData,
+      'savedBy': username,
+      'remark': _remarkController.text,
+      'timestamp': DateTime.now().toIso8601String(),
+    };
+
+    await ApiService.saveReport(fullData);
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Report saved successfully.')));
+  }
 
   void _submitForm(bool isPreview) async {
     if (!_formKey.currentState!.validate()) return; // Validate form
@@ -147,11 +212,13 @@ class _SecondInputScreenState extends State<SecondInputScreen> {
         'hv-lv': _hvLvController.text,
       },
       'ratios': _ratioInputs
-          .map((map) => {
-                'U': map['U']!.text,
-                'V': map['V']!.text,
-                'W': map['W']!.text,
-              })
+          .map(
+            (map) => {
+              'U': map['U']!.text,
+              'V': map['V']!.text,
+              'W': map['W']!.text,
+            },
+          )
           .toList(),
       'windingResistance': {
         'hv': {
@@ -183,16 +250,13 @@ class _SecondInputScreenState extends State<SecondInputScreen> {
       'testData': testData,
       'isPreview': isPreview,
       'savedBy': username,
+      'remark': _remarkController.text,
     };
-
-    if (widget.isEdit) {
-      fullData['version'] = DateTime.now().millisecondsSinceEpoch;
-    }
 
     GoRouter.of(context).push('/preview', extra: fullData);
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Report saved successfully.')),
+      SnackBar(content: Text('Preview generated. Report not saved yet.')),
     );
   }
 
@@ -225,7 +289,9 @@ class _SecondInputScreenState extends State<SecondInputScreen> {
   }
 
   Widget _buildResistanceInputs(
-      Map<String, TextEditingController> map, String title) {
+    Map<String, TextEditingController> map,
+    String title,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -291,9 +357,6 @@ class _SecondInputScreenState extends State<SecondInputScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // UI unchanged
-    // Calls _submitForm(false) or _submitForm(true)
-    // All other widgets unchanged
     return Scaffold(
       appBar: AppBar(title: const Text('Test Parameters Input')),
       body: Padding(
@@ -312,32 +375,48 @@ class _SecondInputScreenState extends State<SecondInputScreen> {
                 TextFormField(
                   controller: _hvEController,
                   decoration: const InputDecoration(
-                      labelText: 'Insulation Resistance HV-E'),
+                    labelText: 'Insulation Resistance HV-E',
+                  ),
                   validator: _numberValidator,
                 ),
                 TextFormField(
                   controller: _lvEController,
                   decoration: const InputDecoration(
-                      labelText: 'Insulation Resistance LV-E'),
+                    labelText: 'Insulation Resistance LV-E',
+                  ),
                   validator: _numberValidator,
                 ),
                 TextFormField(
                   controller: _hvLvController,
                   decoration: const InputDecoration(
-                      labelText: 'Insulation Resistance HV-LV'),
+                    labelText: 'Insulation Resistance HV-LV',
+                  ),
                   validator: _numberValidator,
                 ),
                 const SizedBox(height: 16),
                 _buildRatioInputs(),
                 const SizedBox(height: 16),
                 _buildResistanceInputs(
-                    _hvResControllers, 'HV Winding Resistance'),
+                  _hvResControllers,
+                  'HV Winding Resistance',
+                ),
                 _buildResistanceInputs(
-                    _lvResControllers, 'LV Winding Resistance'),
+                  _lvResControllers,
+                  'LV Winding Resistance',
+                ),
                 const SizedBox(height: 16),
                 _buildTestRow('No Load Test', _noLoadTest),
                 const SizedBox(height: 16),
                 _buildTestRow('Load Test', _loadTest),
+                const SizedBox(height: 24),
+                TextFormField(
+                  controller: _remarkController,
+                  decoration: const InputDecoration(
+                    labelText: 'Remark',
+                    hintText: 'Enter remark (optional)',
+                  ),
+                  maxLines: 2,
+                ),
                 const SizedBox(height: 24),
                 Center(
                   child: Row(
@@ -345,11 +424,11 @@ class _SecondInputScreenState extends State<SecondInputScreen> {
                     children: [
                       ElevatedButton(
                         onPressed: () => _submitForm(false),
-                        child: const Text('Customer Report'),
+                        child: const Text('Preview Report'),
                       ),
                       ElevatedButton(
-                        onPressed: () => _submitForm(true),
-                        child: const Text('Internal Report'),
+                        onPressed: _saveReport,
+                        child: const Text('Save Report'),
                       ),
                     ],
                   ),
@@ -361,6 +440,4 @@ class _SecondInputScreenState extends State<SecondInputScreen> {
       ),
     );
   }
-
-  // ... _buildRatioInputs, _buildResistanceInputs, _buildTestRow remain unchanged
 }

@@ -111,6 +111,7 @@ class TestReportPdfGenerator {
     final i2rLoss75 = hvResistance['loss']! + lvResistance['loss']!;
 
     final String material = (data['material'] ?? '').toString().toLowerCase();
+
     // If material is 'aluminium' or 'aluminum', use 225, else default to 235 (copper)
     double K;
     if (material == 'aluminium') {
@@ -1016,6 +1017,8 @@ class _TestReportPreviewScreenState extends State<TestReportPreviewScreen> {
                   await file.writeAsBytes(bytes);
                   final Map<String, dynamic> reportToSave = {...widget.data};
                   reportToSave['timestamp'] = DateTime.now().toIso8601String();
+                  reportToSave['remark'] =
+                      reportToSave['remark'] + " - Downloaded";
                   await ApiService.saveReport(reportToSave);
 
                   ScaffoldMessenger.of(context).showSnackBar(

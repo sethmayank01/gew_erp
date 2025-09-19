@@ -106,8 +106,13 @@ class ApiService {
     await _sendRequest('POST', '/reports', body: {'data': data});
   }
 
-  static Future<void> deleteReport(Map<String, dynamic> data) async {
-    await _sendRequest('DELETE', '/reports', body: {'data': data});
+  static Future<bool> deleteReport(Map<String, dynamic> data) async {
+    final res = await _sendRequest(
+      'POST',
+      '/reports/delete',
+      body: {'savedBy': data['savedBy'], 'timestamp': data['timestamp']},
+    );
+    return res.statusCode == 200;
   }
 
   static Future<List<dynamic>> getReports() async {

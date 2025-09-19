@@ -40,6 +40,7 @@ class _TestReportPdfGeneratorScreenState
   String? _selectedVectorGroup;
   String? _selectedRelevantIS;
   String? _selectedJobNo;
+  String? _remark;
   String? _selectedMaterial = 'Copper'; // Default to Copper
   List<Map<String, dynamic>> _jobs = [];
 
@@ -83,6 +84,7 @@ class _TestReportPdfGeneratorScreenState
     }
     _selectedVectorGroup = data['vectorGroup'];
     _selectedRelevantIS = data['relevantIS'];
+    _remark = data['remark'] ?? '';
     // Material prefill with fallback to Copper if not present or null/empty/invalid
     final material = (data['material'] ?? '').toString();
     if (_materialOptions.contains(material)) {
@@ -132,6 +134,7 @@ class _TestReportPdfGeneratorScreenState
       'hvVoltage': _hvVoltageController.text,
       'lvVoltage': _lvVoltageController.text,
       'material': _selectedMaterial ?? 'Copper',
+      'remark': _remark,
     };
 
     context.push(
@@ -171,7 +174,7 @@ class _TestReportPdfGeneratorScreenState
     );
     if (picked != null) {
       _dateOfTestingController.text =
-          '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+          '${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}-${picked.year}';
     }
   }
 

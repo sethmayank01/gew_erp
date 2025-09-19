@@ -56,13 +56,19 @@ class _SavedReportsScreenState extends State<SavedReportsScreen> {
       ),
     );
     if (confirm == true) {
-      await ApiService.deleteReport(
+      final retVal = await ApiService.deleteReport(
         report,
       ); // Implement this in your ApiService
       _loadReports();
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Report deleted.')));
+      if (retVal == true) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Report deleted.')));
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error Deleting report')));
+      }
     }
   }
 
@@ -110,13 +116,14 @@ class _SavedReportsScreenState extends State<SavedReportsScreen> {
                     final time = report['timestamp'] ?? '';
                     final formatted = time.toString().split('T').join(' @ ');
                     final savedBy = report['savedBy'] ?? 'Unknown';
+                    final remark = report['remark'] ?? 'Unknown';
 
                     // Versioning: version number is 1 for oldest, increases to latest
                     final versionNumber = versions.length - idx;
 
                     return ListTile(
                       title: Text('Version $versionNumber: $formatted'),
-                      subtitle: Text('Saved by: $savedBy'),
+                      subtitle: Text('Saved by: $savedBy, Remark: $remark'),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -126,7 +133,8 @@ class _SavedReportsScreenState extends State<SavedReportsScreen> {
                               context.push('/preview', extra: report);
                             },
                           ),
-                          if (_userRole == 'admin') ...[
+                          // EDIT: All users (including non-admins) can edit
+                          if (savedBy == _username || _userRole == 'admin')
                             IconButton(
                               icon: const Icon(Icons.edit),
                               onPressed: () {
@@ -147,12 +155,13 @@ class _SavedReportsScreenState extends State<SavedReportsScreen> {
                                 );
                               },
                             ),
+                          // DELETE: Only admins can delete
+                          if (_userRole == 'admin')
                             IconButton(
                               icon: const Icon(Icons.delete, color: Colors.red),
                               onPressed: () => _deleteReport(report),
                               tooltip: 'Delete Report',
                             ),
-                          ],
                         ],
                       ),
                     );
