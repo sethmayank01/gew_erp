@@ -232,7 +232,7 @@ class TestReportPdfGenerator {
               'Serial No',
               data['serialNo'] ?? '',
               'Date of Testing',
-              data['date'] ?? '',
+              data['dateOfTesting'] ?? '',
               baseTextStyle,
             ),
             _row(

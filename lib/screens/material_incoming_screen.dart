@@ -516,7 +516,8 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                 child: ListTile(
                   title: Text(entry['material'] ?? ''),
                   subtitle: Text(
-                    "Qty: ${entry['quantity']} | Serial No: ${entry['serialNo']} | Price: ${entry['price']} | Make: ${entry['make']} | Invoice No: ${entry['invoice']} | Entry Date: ${entry['entryDate']} | User: ${entry['user']} | Approved By: ${entry['approved_by']} | Approved: ${entry['approved'] == true ? 'Yes' : 'No'}",
+                    "Qty: ${entry['quantity']} | Serial No: ${entry['serialNo']} | Price: ${entry['price']} | Total Price: "
+                    "${(double.tryParse(entry['quantity'].toString()) ?? 0) * (double.tryParse(entry['price'].toString()) ?? 0)} | Make: ${entry['make']} | Invoice No: ${entry['invoice']} | Entry Date: ${entry['entryDate']} | User: ${entry['user']} | Approved By: ${entry['approved_by']} | Approved: ${entry['approved'] == true ? 'Yes' : 'No'}",
                   ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,

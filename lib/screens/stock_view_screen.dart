@@ -14,7 +14,7 @@ class _StockViewScreenState extends State<StockViewScreen> {
   List<Map<String, dynamic>> _generalStock = [];
   List<Map<String, dynamic>> _jobStock = [];
   List<String> _jobNumbers = [];
-  Map<String, List<Map<String, dynamic>>> _allIndentStocks = {};
+  Map<String, Map<String, dynamic>> _allIndentStocks = {};
   Map<String, double> _indentQtyMap = {};
   String _role = 'user';
   bool _isLoading = false;
@@ -64,14 +64,31 @@ class _StockViewScreenState extends State<StockViewScreen> {
 
   Future<void> _loadJobs() async {
     final jobs = await ApiService.getOpenJobs();
-    final nonFinalizedJobs = jobs
-        .map<String>((job) => job['serialNo'].toString())
-        .toList();
-    setState(() => _jobNumbers = nonFinalizedJobs);
-    for (var jobNo in nonFinalizedJobs) {
+    Map<String, Map<String, dynamic>> jobStockData = {};
+
+    for (var job in jobs) {
+      final jobNo = job['serialNo'].toString();
+      final purchaserName = job['purchaserName']?.toString() ?? '';
+      final kva = job['kva']?.toString() ?? '';
+      final tappingType = job['tappingType']?.toString() ?? '';
+      final hvVolts = job['hvVoltage']?.toString() ?? '';
+      final lvVolts = job['lvVoltage']?.toString() ?? '';
       final indents = await ApiService.getIndentsForJob(jobNo);
-      _allIndentStocks[jobNo] = List<Map<String, dynamic>>.from(indents);
+
+      jobStockData[jobNo] = {
+        'purchaserName': purchaserName,
+        'kVA': kva,
+        'tappingType': tappingType,
+        'hvVoltage': hvVolts,
+        'lvVoltage': lvVolts,
+        'entries': List<Map<String, dynamic>>.from(indents),
+      };
     }
+
+    setState(() {
+      _jobNumbers = jobStockData.keys.toList();
+      _allIndentStocks = jobStockData;
+    });
   }
 
   Future<void> _loadIndentQtys() async {
@@ -173,7 +190,6 @@ class _StockViewScreenState extends State<StockViewScreen> {
     });
   }
 
-  // New: Edit dialog for stock entries
   Future<void> _editStockEntry(
     Map<String, dynamic> entry,
     bool isJobStock,
@@ -218,7 +234,6 @@ class _StockViewScreenState extends State<StockViewScreen> {
               Map<String, dynamic> updatedEntry = Map.of(entry);
               updatedEntry['quantity'] = newQty;
               updatedEntry['price'] = newPrice;
-              // Call API to update stock entry (you should implement updateStockQuantity accordingly)
               final result = await ApiService.updateStockQuantity(
                 data: updatedEntry,
                 quantity: newQty,
@@ -437,34 +452,30 @@ class _StockViewScreenState extends State<StockViewScreen> {
     );
   }
 
-  double _calculateTotalIndentAllJobs() {
-    double total = 0.0;
-    _allIndentStocks.forEach((jobNo, entries) {
+  Widget _buildIndentList() {
+    List<Map<String, dynamic>> jobSummary = [];
+
+    for (var jobNo in _jobNumbers) {
+      final jobData = _allIndentStocks[jobNo]!;
+      final entries = jobData['entries'] as List<Map<String, dynamic>>;
+      double totalValue = 0.0;
       for (var entry in entries) {
         final qty = entry['issuedQty'] ?? 0.0;
         final price = entry['price'] ?? 0.0;
-        total += qty * price;
+        totalValue += qty * price;
       }
-    });
-    return total;
-  }
+      jobSummary.add({
+        'job': jobNo,
+        'customer': jobData['purchaserName'] ?? '',
+        'kva': jobData['kVA'] ?? '',
+        'tappingType': jobData['tappingType'],
+        'hvVoltage': jobData['hvVoltage'],
+        'lvVoltage': jobData['lvVoltage'],
+        'value': totalValue,
+      });
+    }
 
-  Widget _buildIndentList() {
-    Map<String, double> jobIssuedValues = {};
-    for (var job in _jobNumbers) {
-      jobIssuedValues[job] = 0.0;
-    }
-    for (var job in _jobNumbers) {
-      final indents = _allIndentStocks[job] ?? [];
-      for (var entry in indents) {
-        final qty = entry['issuedQty'] ?? 0.0;
-        final price = entry['price'] ?? 0.0;
-        jobIssuedValues[job] = jobIssuedValues[job]! + qty * price;
-      }
-    }
-    List<Map<String, dynamic>> jobSummary = jobIssuedValues.entries
-        .map((e) => {'job': e.key, 'value': e.value})
-        .toList();
+    // Sorting
     if (_indentSortByValue) {
       jobSummary.sort(
         (a, b) => _indentSortAsc
@@ -481,7 +492,7 @@ class _StockViewScreenState extends State<StockViewScreen> {
 
     return ExpansionTile(
       title: Text(
-        "Indent Stock for Non-Finalized Jobs (Total ₹${jobIssuedValues.values.fold(0.0, (a, b) => a + b).toStringAsFixed(2)})",
+        "Indent Stock for Non-Finalized Jobs (Total ₹${jobSummary.fold(0.0, (a, b) => a + (b['value'] as double)).toStringAsFixed(2)})",
         style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
       ),
       children: [
@@ -519,6 +530,36 @@ class _StockViewScreenState extends State<StockViewScreen> {
                     ),
                   ),
                   Expanded(
+                    child: const Text(
+                      "Customer",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Expanded(
+                    child: const Text(
+                      "kVA",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Expanded(
+                    child: const Text(
+                      "Tapping Type",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Expanded(
+                    child: const Text(
+                      "HT Volts",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Expanded(
+                    child: const Text(
+                      "LT Volts",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Expanded(
                     child: GestureDetector(
                       onTap: () {
                         setState(() {
@@ -548,12 +589,17 @@ class _StockViewScreenState extends State<StockViewScreen> {
                 ],
               ),
               const Divider(),
-              ...jobSummary.map((entry) {
-                return Padding(
+              ...jobSummary.map(
+                (entry) => Padding(
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   child: Row(
                     children: [
                       Expanded(child: Text(entry['job'])),
+                      Expanded(child: Text(entry['customer'] ?? '')),
+                      Expanded(child: Text(entry['kva'] ?? '')),
+                      Expanded(child: Text(entry['tappingType'])),
+                      Expanded(child: Text(entry['hvVoltage'] ?? '')),
+                      Expanded(child: Text(entry['lvVoltage'] ?? '')),
                       Expanded(
                         child: Text(
                           "₹${(entry['value'] as double).toStringAsFixed(2)}",
@@ -561,8 +607,8 @@ class _StockViewScreenState extends State<StockViewScreen> {
                       ),
                     ],
                   ),
-                );
-              }).toList(),
+                ),
+              ),
             ],
           ),
         ),
@@ -591,7 +637,6 @@ class _StockViewScreenState extends State<StockViewScreen> {
   Widget build(BuildContext context) {
     final groupedGeneral = _filterGrouped(_groupGeneralStock());
     final groupedJob = _filterGrouped(_groupJobStock());
-    final indentTotal = _calculateTotalIndentAllJobs();
     final generalTotal = groupedGeneral.values.fold<double>(
       0.0,
       (a, b) => a + (b['finalValue'] as double),
@@ -600,85 +645,52 @@ class _StockViewScreenState extends State<StockViewScreen> {
       0.0,
       (a, b) => a + (b['finalValue'] as double),
     );
-    final grandTotal = generalTotal + jobTotal + indentTotal;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Stock Overview')),
+      appBar: AppBar(title: const Text('Stock View')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: () async {
-                await _loadStock();
-                await _loadIndentQtys();
-              },
-              child: ListView(
-                padding: const EdgeInsets.all(10),
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12.0),
-                    child: TextField(
-                      controller: _searchController,
-                      decoration: InputDecoration(
-                        prefixIcon: Icon(Icons.search),
-                        hintText: "Search stock...",
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8.0),
-                        ),
-                        suffixIcon: _searchQuery.isNotEmpty
-                            ? IconButton(
-                                icon: Icon(Icons.clear),
-                                onPressed: () {
-                                  setState(() {
-                                    _searchQuery = '';
-                                    _searchController.clear();
-                                  });
-                                },
-                              )
-                            : null,
-                      ),
-                      onChanged: (value) {
-                        setState(() {
-                          _searchQuery = value;
-                        });
-                      },
+                  TextField(
+                    controller: _searchController,
+                    decoration: const InputDecoration(
+                      labelText: 'Search',
+                      prefixIcon: Icon(Icons.search),
                     ),
-                  ),
-                  Card(
-                    child: ListTile(
-                      title: const Text("Grand Total"),
-                      subtitle: Text(
-                        "₹${grandTotal.toStringAsFixed(2)}",
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      ),
-                    ),
+                    onChanged: (value) => setState(() => _searchQuery = value),
                   ),
                   const SizedBox(height: 10),
                   _buildGroupedStockSection(
-                    sectionTitle: "General Stock",
+                    sectionTitle: 'General Stock',
                     grouped: groupedGeneral,
                     isJobStock: false,
                     expandedKeys: _expandedGeneralKeys,
-                    onToggleExpand: (key) => setState(() {
-                      _expandedGeneralKeys[key] =
-                          !(_expandedGeneralKeys[key] ?? false);
-                    }),
+                    onToggleExpand: (key) {
+                      setState(() {
+                        _expandedGeneralKeys[key] =
+                            !(_expandedGeneralKeys[key] ?? false);
+                      });
+                    },
                   ),
                   const SizedBox(height: 10),
                   _buildGroupedStockSection(
-                    sectionTitle: "Job-Specific Stock",
+                    sectionTitle: 'Job Stock',
                     grouped: groupedJob,
                     isJobStock: true,
                     expandedKeys: _expandedJobKeys,
-                    onToggleExpand: (key) => setState(() {
-                      _expandedJobKeys[key] = !(_expandedJobKeys[key] ?? false);
-                    }),
+                    onToggleExpand: (key) {
+                      setState(() {
+                        _expandedJobKeys[key] =
+                            !(_expandedJobKeys[key] ?? false);
+                      });
+                    },
                   ),
                   const SizedBox(height: 10),
                   _buildIndentList(),
-                  const SizedBox(height: 10),
                 ],
               ),
             ),

@@ -3,6 +3,7 @@ import 'package:excel/excel.dart';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import '../services/api_service.dart';
+import 'package:dropdown_search/dropdown_search.dart';
 
 class IndentViewScreen extends StatefulWidget {
   const IndentViewScreen({super.key});
@@ -13,10 +14,13 @@ class IndentViewScreen extends StatefulWidget {
 
 class _IndentViewScreenState extends State<IndentViewScreen> {
   List<Map<String, dynamic>> _jobs = [];
+  List<Map<String, dynamic>> _filteredJobs = [];
   List<Map<String, dynamic>> _indents = [];
   List<Map<String, dynamic>> _materials = [];
   Map<String, dynamic>? _selectedJob;
   bool _isLoading = false;
+
+  final TextEditingController _searchController = TextEditingController();
 
   // The only valid groups, all uppercase for case-insensitive matching
   final List<String> _groups = ['CCA', 'TANKING', 'MOUNTING', 'ACC', 'SUNDRY'];
@@ -25,6 +29,27 @@ class _IndentViewScreenState extends State<IndentViewScreen> {
   void initState() {
     super.initState();
     _loadMaterialsAndJobs();
+    _searchController.addListener(_filterJobs);
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _filterJobs() {
+    final query = _searchController.text.toLowerCase();
+    setState(() {
+      _filteredJobs = _jobs.where((job) {
+        final serialNo = (job['serialNo'] ?? '').toString().toLowerCase();
+        final kva = (job['kva'] ?? job['KVA'] ?? '').toString().toLowerCase();
+        final purchaser = (job['purchaserName'] ?? '').toString().toLowerCase();
+        return serialNo.contains(query) ||
+            kva.contains(query) ||
+            purchaser.contains(query);
+      }).toList();
+    });
   }
 
   Future<void> _loadMaterialsAndJobs() async {
@@ -43,6 +68,45 @@ class _IndentViewScreenState extends State<IndentViewScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Error loading materials: $e')));
+    }
+  }
+
+  Future<void> _loadJobs() async {
+    try {
+      final jobs = await ApiService.getJobs();
+      setState(() {
+        _jobs = List<Map<String, dynamic>>.from(
+          jobs.where((job) => job['status'] != 'isFinal').toList(),
+        );
+        _filteredJobs = List.from(_jobs); // initially all jobs
+      });
+    } catch (e) {
+      _jobs = [];
+      _filteredJobs = [];
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error loading jobs: $e')));
+    }
+  }
+
+  Future<void> _loadIndentsForJob(String jobId) async {
+    setState(() {
+      _isLoading = true;
+      _indents = [];
+    });
+    try {
+      final indents = await ApiService.getIndentsForJob(jobId);
+      setState(() {
+        _indents = List<Map<String, dynamic>>.from(indents).map((indent) {
+          return {...indent, 'category': _getCategoryForIndent(indent)};
+        }).toList();
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error loading indents: $e')));
     }
   }
 
@@ -84,7 +148,6 @@ class _IndentViewScreenState extends State<IndentViewScreen> {
       String indentGroup = (i['category'] ?? '').toString().toUpperCase();
       return indentGroup == group;
     }).toList();
-    // Sort alphabetically by 'type', then 'subtype'
     items.sort((a, b) {
       final typeA = (a['type'] ?? '').toString();
       final typeB = (b['type'] ?? '').toString();
@@ -95,43 +158,6 @@ class _IndentViewScreenState extends State<IndentViewScreen> {
       return subtypeA.compareTo(subtypeB);
     });
     return items;
-  }
-
-  Future<void> _loadJobs() async {
-    try {
-      final jobs = await ApiService.getJobs();
-      setState(() {
-        _jobs = List<Map<String, dynamic>>.from(
-          jobs.where((job) => job['status'] != 'isFinal').toList(),
-        );
-      });
-    } catch (e) {
-      _jobs = [];
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error loading jobs: $e')));
-    }
-  }
-
-  Future<void> _loadIndentsForJob(String jobId) async {
-    setState(() {
-      _isLoading = true;
-      _indents = [];
-    });
-    try {
-      final indents = await ApiService.getIndentsForJob(jobId);
-      setState(() {
-        _indents = List<Map<String, dynamic>>.from(indents).map((indent) {
-          return {...indent, 'category': _getCategoryForIndent(indent)};
-        }).toList();
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() => _isLoading = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error loading indents: $e')));
-    }
   }
 
   TableRow _buildHeaderRow() {
@@ -382,7 +408,6 @@ class _IndentViewScreenState extends State<IndentViewScreen> {
     }
 
     try {
-      // Only support for desktop platforms (Windows/Mac/Linux) via dart:io
       final Excel excel = Excel.createExcel();
       final String sheetName = "Indents";
       final Sheet sheet = excel[sheetName];
@@ -417,7 +442,6 @@ class _IndentViewScreenState extends State<IndentViewScreen> {
         ]);
       }
 
-      // Default file name
       final String jobSerial =
           _selectedJob?['serialNo']?.toString().replaceAll(
             RegExp(r'[\\/:*?"<>|]'),
@@ -426,7 +450,6 @@ class _IndentViewScreenState extends State<IndentViewScreen> {
           'job';
       final String defaultFileName = "Indent_$jobSerial.xlsx";
 
-      // Ask user where to save
       String? outputPath;
       if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
         outputPath = await FilePicker.platform.saveFile(
@@ -437,15 +460,10 @@ class _IndentViewScreenState extends State<IndentViewScreen> {
         );
       }
 
-      if (outputPath == null) {
-        // User cancelled the picker
-        return;
-      }
+      if (outputPath == null) return;
 
       final fileBytes = excel.encode();
-      if (fileBytes == null) {
-        throw Exception('Failed to encode Excel file.');
-      }
+      if (fileBytes == null) throw Exception('Failed to encode Excel file.');
 
       final file = File(outputPath);
       await file.writeAsBytes(fileBytes, flush: true);
@@ -462,7 +480,6 @@ class _IndentViewScreenState extends State<IndentViewScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Responsive: mobile if width < 600, else desktop/tablet
     final isMobile = MediaQuery.of(context).size.width < 600;
     final isDesktop =
         Platform.isWindows || Platform.isLinux || Platform.isMacOS;
@@ -476,25 +493,50 @@ class _IndentViewScreenState extends State<IndentViewScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  DropdownButton<Map<String, dynamic>>(
-                    value: _selectedJob,
-                    hint: const Text('Select Job'),
-                    isExpanded: true,
-                    items: _jobs.map((job) {
-                      return DropdownMenuItem(
-                        value: job,
-                        child: Text(job['serialNo'] ?? 'Unknown Job'),
-                      );
-                    }).toList(),
+                  DropdownSearch<Map<String, dynamic>>(
+                    items:
+                        _filteredJobs.isEmpty && _searchController.text.isEmpty
+                        ? _jobs
+                        : _filteredJobs,
+                    selectedItem: _selectedJob,
+                    itemAsString: (job) {
+                      final serialNo = job['serialNo'] ?? 'Unknown Job';
+                      final kva = job['kva'] ?? job['KVA'] ?? '';
+                      final purchaser = job['purchaserName'] ?? '';
+                      final tappingType = job['tappingType'] ?? '';
+                      final hvVolt = job['hvVoltage'] ?? '';
+                      final lvVolt = job['lvVoltage'] ?? '';
+
+                      return [
+                        serialNo,
+                        if (kva.toString().isNotEmpty) '${kva} kVA',
+                        if (tappingType.toString().isNotEmpty) tappingType,
+                        if (hvVolt.toString().isNotEmpty) '${hvVolt} V',
+                        if (lvVolt.toString().isNotEmpty) '${lvVolt} V',
+                        if (purchaser.isNotEmpty) purchaser,
+                      ].join(' - ');
+                    },
+                    popupProps: PopupProps.menu(
+                      showSearchBox: true,
+                      searchFieldProps: TextFieldProps(
+                        controller: _searchController,
+                        decoration: const InputDecoration(
+                          hintText: 'Search job, KVA, or purchaser...',
+                        ),
+                      ),
+                    ),
+                    dropdownDecoratorProps: const DropDownDecoratorProps(
+                      dropdownSearchDecoration: InputDecoration(
+                        labelText: 'Select Job',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
                     onChanged: (job) {
-                      setState(() {
-                        _selectedJob = job;
-                      });
-                      if (job != null) {
-                        _loadIndentsForJob(job['serialNo']);
-                      }
+                      setState(() => _selectedJob = job);
+                      if (job != null) _loadIndentsForJob(job['serialNo']);
                     },
                   ),
+
                   if (_indents.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 8),
