@@ -122,7 +122,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Welcome to GEW ERP 1.1'),
+        title: const Text('Welcome to GEW ERP 1.2'),
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),

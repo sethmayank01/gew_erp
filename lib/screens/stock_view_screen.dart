@@ -247,9 +247,9 @@ class _StockViewScreenState extends State<StockViewScreen> {
                 });
                 updated = true;
                 Navigator.pop(context);
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(SnackBar(content: Text('Stock entry updated')));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Stock entry updated')),
+                );
               } else {
                 ScaffoldMessenger.of(
                   context,
@@ -490,9 +490,14 @@ class _StockViewScreenState extends State<StockViewScreen> {
       );
     }
 
+    final totalIndentValue = jobSummary.fold(
+      0.0,
+      (a, b) => a + (b['value'] as double),
+    );
+
     return ExpansionTile(
       title: Text(
-        "Indent Stock for Non-Finalized Jobs (Total ₹${jobSummary.fold(0.0, (a, b) => a + (b['value'] as double)).toStringAsFixed(2)})",
+        "Indent Stock for Non-Finalized Jobs (Total ₹${totalIndentValue.toStringAsFixed(2)})",
         style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
       ),
       children: [
@@ -529,32 +534,32 @@ class _StockViewScreenState extends State<StockViewScreen> {
                       ),
                     ),
                   ),
-                  Expanded(
-                    child: const Text(
+                  const Expanded(
+                    child: Text(
                       "Customer",
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ),
-                  Expanded(
-                    child: const Text(
+                  const Expanded(
+                    child: Text(
                       "kVA",
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ),
-                  Expanded(
-                    child: const Text(
+                  const Expanded(
+                    child: Text(
                       "Tapping Type",
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ),
-                  Expanded(
-                    child: const Text(
+                  const Expanded(
+                    child: Text(
                       "HT Volts",
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ),
-                  Expanded(
-                    child: const Text(
+                  const Expanded(
+                    child: Text(
                       "LT Volts",
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
@@ -597,7 +602,7 @@ class _StockViewScreenState extends State<StockViewScreen> {
                       Expanded(child: Text(entry['job'])),
                       Expanded(child: Text(entry['customer'] ?? '')),
                       Expanded(child: Text(entry['kva'] ?? '')),
-                      Expanded(child: Text(entry['tappingType'])),
+                      Expanded(child: Text(entry['tappingType'] ?? '')),
                       Expanded(child: Text(entry['hvVoltage'] ?? '')),
                       Expanded(child: Text(entry['lvVoltage'] ?? '')),
                       Expanded(
@@ -646,6 +651,22 @@ class _StockViewScreenState extends State<StockViewScreen> {
       (a, b) => a + (b['finalValue'] as double),
     );
 
+    // Calculate indent total
+    double indentTotal = 0.0;
+    for (var jobNo in _jobNumbers) {
+      final jobData = _allIndentStocks[jobNo];
+      if (jobData != null) {
+        final entries = jobData['entries'] as List<Map<String, dynamic>>;
+        for (var entry in entries) {
+          final qty = entry['issuedQty'] ?? 0.0;
+          final price = entry['price'] ?? 0.0;
+          indentTotal += qty * price;
+        }
+      }
+    }
+
+    final grandTotal = generalTotal + jobTotal + indentTotal;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Stock View')),
       body: _isLoading
@@ -655,6 +676,32 @@ class _StockViewScreenState extends State<StockViewScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // --- NEW TOTAL SUMMARY SECTION ---
+                  Card(
+                    //color: Colors.blueGrey.shade50,
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    margin: const EdgeInsets.only(bottom: 10),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "Total Stock: ₹${grandTotal.toStringAsFixed(2)}",
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // ----------------------------------
                   TextField(
                     controller: _searchController,
                     decoration: const InputDecoration(
