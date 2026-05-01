@@ -120,6 +120,9 @@ class _JobListScreenState extends State<JobListScreen> {
             (job['purchaserReference'] ?? '').toString().toLowerCase().contains(
               _searchQuery,
             ) ||
+            (job['kva'] ?? '').toString().toLowerCase().contains(
+              _searchQuery,
+            ) ||
             (job['jobType'] ?? '').toString().toLowerCase().contains(
               _searchQuery,
             );

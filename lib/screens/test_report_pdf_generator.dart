@@ -878,7 +878,7 @@ class TestReportPdfGenerator {
         final user = ratios[i];
         return [
           sno[i],
-          tap.toStringAsFixed(1),
+          tap.toStringAsFixed(2),
           calcRatio.toStringAsFixed(2),
           user['U'].toString(),
           _deviation(calcRatio, user['U']),

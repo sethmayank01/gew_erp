@@ -174,7 +174,7 @@ class _TestReportPdfGeneratorScreenState
     );
     if (picked != null) {
       _dateOfTestingController.text =
-          '${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}-${picked.year}';
+          '${picked.day.toString().padLeft(2, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.year}';
     }
   }
 

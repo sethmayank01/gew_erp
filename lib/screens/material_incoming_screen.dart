@@ -24,6 +24,11 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
   final _descController = TextEditingController();
   final _invoiceController = TextEditingController();
 
+  final TextEditingController _searchController = TextEditingController();
+
+  // ✅ Added for always-visible scrollbar
+  final ScrollController _scrollController = ScrollController();
+
   List<Map<String, dynamic>> _materialsRaw = [];
   List<String> _materials = [];
   List<String> _jobNumbers = [];
@@ -31,8 +36,6 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
 
   String _role = '';
   String _username = '';
-
-  final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
   @override
@@ -56,6 +59,7 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
     _descController.dispose();
     _invoiceController.dispose();
     _searchController.dispose();
+    _scrollController.dispose(); // ✅ Added
     super.dispose();
   }
 
@@ -112,12 +116,13 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
       (m) => m['type'] == type && m['subtype'] == subtype,
       orElse: () => {},
     );
+
     setState(() {
       _type = type;
       _subtype = subtype;
       _selectedMaterial = value;
       _isJobSpecific = material['jobSpecific'] ?? false;
-      _selectedJob = null; // Reset job on material change
+      _selectedJob = null;
     });
   }
 
@@ -141,9 +146,11 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
 
     await ApiService.submitMaterialIncoming(data);
     await _loadEntries();
+
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text("Material entry submitted")));
+
     _formKey.currentState!.reset();
     setState(() {
       _selectedMaterial = null;
@@ -182,6 +189,7 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
     final invoiceController = TextEditingController(
       text: entry['invoice']?.toString() ?? '',
     );
+
     String? selectedMaterial = entry['material'];
     String? selectedJob = entry['serialNo'];
 
@@ -302,12 +310,15 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                   'invoice': invoiceController.text,
                   if (entry['jobSpecific'] == true) 'serialNo': selectedJob,
                 };
+
                 await ApiService.updateMaterialIncomingEntry(
                   entryId: entry['id'],
                   data: updatedEntry,
                 );
+
                 Navigator.pop(context);
                 await _loadEntries();
+
                 ScaffoldMessenger.of(
                   context,
                 ).showSnackBar(const SnackBar(content: Text("Entry updated")));
@@ -325,6 +336,7 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
     final filteredEntries = _entries.where((entry) {
       final search = _searchQuery;
       if (search.isEmpty) return true;
+
       final fieldsToSearch = [
         (entry['type'] ?? '').toString().toLowerCase(),
         (entry['subtype'] ?? '').toString().toLowerCase(),
@@ -332,6 +344,7 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
         (entry['invoice'] ?? '').toString().toLowerCase(),
         (entry['serialNo'] ?? '').toString().toLowerCase(),
       ];
+
       return fieldsToSearch.any((field) => field.contains(search));
     }).toList();
 
@@ -339,58 +352,38 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
       appBar: AppBar(title: const Text('Material Incoming')),
       body: Padding(
         padding: const EdgeInsets.all(12.0),
-        child: ListView(
-          children: [
-            Form(
-              key: _formKey,
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownSearch<String>(
-                          selectedItem: _selectedMaterial,
-                          items: _materials,
-                          filterFn: (item, filter) {
-                            if (item == null || filter == null) return false;
-                            final filterWords = filter
-                                .toLowerCase()
-                                .split(' ')
-                                .where((w) => w.isNotEmpty);
-                            final lowerItem = item.toLowerCase();
-                            return filterWords.every(
-                              (word) => lowerItem.contains(word),
-                            );
-                          },
-                          dropdownDecoratorProps: const DropDownDecoratorProps(
-                            dropdownSearchDecoration: InputDecoration(
-                              labelText: "Material Type",
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                          popupProps: const PopupProps.menu(
-                            showSearchBox: true,
-                            searchFieldProps: TextFieldProps(
-                              decoration: InputDecoration(
-                                hintText: "Search type or subtype...",
-                                border: OutlineInputBorder(),
-                              ),
-                            ),
-                          ),
-                          validator: (val) => val == null ? 'Required' : null,
-                          onChanged: _handleMaterialSelection,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      if (_isJobSpecific)
+        child: Scrollbar(
+          controller: _scrollController,
+          thumbVisibility: true,
+          trackVisibility: true,
+          child: ListView(
+            controller: _scrollController,
+            children: [
+              Form(
+                key: _formKey,
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
                         Expanded(
                           child: DropdownSearch<String>(
-                            selectedItem: _selectedJob,
-                            items: List<String>.from(_jobNumbers),
+                            selectedItem: _selectedMaterial,
+                            items: _materials,
+                            filterFn: (item, filter) {
+                              if (item == null || filter == null) return false;
+                              final filterWords = filter
+                                  .toLowerCase()
+                                  .split(' ')
+                                  .where((w) => w.isNotEmpty);
+                              final lowerItem = item.toLowerCase();
+                              return filterWords.every(
+                                (word) => lowerItem.contains(word),
+                              );
+                            },
                             dropdownDecoratorProps:
                                 const DropDownDecoratorProps(
                                   dropdownSearchDecoration: InputDecoration(
-                                    labelText: "Job Number",
+                                    labelText: "Material Type",
                                     border: OutlineInputBorder(),
                                   ),
                                 ),
@@ -398,169 +391,203 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                               showSearchBox: true,
                               searchFieldProps: TextFieldProps(
                                 decoration: InputDecoration(
-                                  hintText: "Search...",
+                                  hintText: "Search type or subtype...",
                                   border: OutlineInputBorder(),
                                 ),
                               ),
                             ),
                             validator: (val) => val == null ? 'Required' : null,
-                            onChanged: (val) =>
-                                setState(() => _selectedJob = val),
+                            onChanged: _handleMaterialSelection,
                           ),
                         ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: _qtyController,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          decoration: const InputDecoration(
-                            labelText: 'Quantity',
-                            border: OutlineInputBorder(),
-                          ),
-                          validator: (val) {
-                            if (val == null || val.isEmpty) return 'Required';
-                            final parsed = double.tryParse(val);
-                            if (parsed == null) return 'Enter valid number';
-                            return null;
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextFormField(
-                          controller: _priceController,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          decoration: const InputDecoration(
-                            labelText: 'Price',
-                            border: OutlineInputBorder(),
-                          ),
-                          validator: (val) {
-                            if (val == null || val.isEmpty) return 'Required';
-                            final parsed = double.tryParse(val);
-                            if (parsed == null) return 'Enter valid number';
-                            return null;
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: _makeController,
-                          decoration: const InputDecoration(
-                            labelText: 'Make',
-                            border: OutlineInputBorder(),
-                          ),
-                          validator: (val) => val == null || val.trim().isEmpty
-                              ? 'Required'
-                              : null,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextFormField(
-                          controller: _descController,
-                          decoration: const InputDecoration(
-                            labelText: 'Description',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    controller: _invoiceController,
-                    decoration: const InputDecoration(
-                      labelText: 'Invoice Number',
-                      border: OutlineInputBorder(),
-                    ),
-                    validator: (val) =>
-                        val == null || val.trim().isEmpty ? 'Required' : null,
-                  ),
-                  const SizedBox(height: 12),
-                  ElevatedButton(
-                    onPressed: _submit,
-                    child: const Text('Submit'),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 30),
-            const Text('Incoming Entries', style: TextStyle(fontSize: 18)),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8.0),
-              child: TextField(
-                controller: _searchController,
-                decoration: const InputDecoration(
-                  labelText: 'Search incoming entries',
-                  prefixIcon: Icon(Icons.search),
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ),
-            ...filteredEntries.map(
-              (entry) => Card(
-                child: ListTile(
-                  title: Text(entry['material'] ?? ''),
-                  subtitle: Text(
-                    "Qty: ${entry['quantity']} | Serial No: ${entry['serialNo']} | Price: ${entry['price']} | Total Price: "
-                    "${(double.tryParse(entry['quantity'].toString()) ?? 0) * (double.tryParse(entry['price'].toString()) ?? 0)} | Make: ${entry['make']} | Invoice No: ${entry['invoice']} | Description: ${entry['description']} | Entry Date: ${entry['entryDate']} | User: ${entry['user']} | Approved By: ${entry['approved_by']} | Approved: ${entry['approved'] == true ? 'Yes' : 'No'}",
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if ((_role == "admin" || entry['user'] == _username) &&
-                          entry['approved'] != true)
-                        IconButton(
-                          icon: const Icon(Icons.edit, color: Colors.blue),
-                          onPressed: () => _showEditDialog(entry),
-                        ),
-                      if ((_role == "admin" || entry['user'] == _username) &&
-                          entry['approved'] != true)
-                        IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.red),
-                          onPressed: () =>
-                              _deleteEntry(entry['id'], entry['user']),
-                        ),
-                      if (_role == "admin" && entry['approved'] != true)
-                        IconButton(
-                          icon: const Icon(Icons.check, color: Colors.green),
-                          tooltip: "Approve",
-                          onPressed: () async {
-                            await ApiService.approveMaterialEntry(
-                              entryId: entry['id'],
-                              approver: _username,
-                            );
-                            await ApiService.addStock(data: entry);
-                            await _loadEntries();
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  "Entry approved and added to stock",
+                        const SizedBox(width: 10),
+                        if (_isJobSpecific)
+                          Expanded(
+                            child: DropdownSearch<String>(
+                              selectedItem: _selectedJob,
+                              items: List<String>.from(_jobNumbers),
+                              dropdownDecoratorProps:
+                                  const DropDownDecoratorProps(
+                                    dropdownSearchDecoration: InputDecoration(
+                                      labelText: "Job Number",
+                                      border: OutlineInputBorder(),
+                                    ),
+                                  ),
+                              popupProps: const PopupProps.menu(
+                                showSearchBox: true,
+                                searchFieldProps: TextFieldProps(
+                                  decoration: InputDecoration(
+                                    hintText: "Search...",
+                                    border: OutlineInputBorder(),
+                                  ),
                                 ),
                               ),
-                            );
-                          },
+                              validator: (val) =>
+                                  val == null ? 'Required' : null,
+                              onChanged: (val) =>
+                                  setState(() => _selectedJob = val),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _qtyController,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Quantity',
+                              border: OutlineInputBorder(),
+                            ),
+                            validator: (val) {
+                              if (val == null || val.isEmpty) return 'Required';
+                              final parsed = double.tryParse(val);
+                              if (parsed == null) return 'Enter valid number';
+                              return null;
+                            },
+                          ),
                         ),
-                    ],
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _priceController,
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Price',
+                              border: OutlineInputBorder(),
+                            ),
+                            validator: (val) {
+                              if (val == null || val.isEmpty) return 'Required';
+                              final parsed = double.tryParse(val);
+                              if (parsed == null) return 'Enter valid number';
+                              return null;
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _makeController,
+                            decoration: const InputDecoration(
+                              labelText: 'Make',
+                              border: OutlineInputBorder(),
+                            ),
+                            validator: (val) =>
+                                val == null || val.trim().isEmpty
+                                ? 'Required'
+                                : null,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _descController,
+                            decoration: const InputDecoration(
+                              labelText: 'Description',
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      controller: _invoiceController,
+                      decoration: const InputDecoration(
+                        labelText: 'Invoice Number',
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (val) =>
+                          val == null || val.trim().isEmpty ? 'Required' : null,
+                    ),
+                    const SizedBox(height: 12),
+                    ElevatedButton(
+                      onPressed: _submit,
+                      child: const Text('Submit'),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 30),
+              const Text('Incoming Entries', style: TextStyle(fontSize: 18)),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8.0),
+                child: TextField(
+                  controller: _searchController,
+                  decoration: const InputDecoration(
+                    labelText: 'Search incoming entries',
+                    prefixIcon: Icon(Icons.search),
+                    border: OutlineInputBorder(),
                   ),
                 ),
               ),
-            ),
-          ],
+              ...filteredEntries.map(
+                (entry) => Card(
+                  child: ListTile(
+                    title: Text(entry['material'] ?? ''),
+                    subtitle: Text(
+                      "Qty: ${entry['quantity']} | Serial No: ${entry['serialNo']} | Price: ${entry['price']} | Total Price: "
+                      "${(double.tryParse(entry['quantity'].toString()) ?? 0) * (double.tryParse(entry['price'].toString()) ?? 0)} | "
+                      "Make: ${entry['make']} | Invoice No: ${entry['invoice']} | "
+                      "Description: ${entry['description']} | Entry Date: ${entry['entryDate']} | "
+                      "User: ${entry['user']} | Approved By: ${entry['approved_by']} | "
+                      "Approved: ${entry['approved'] == true ? 'Yes' : 'No'}",
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if ((_role == "admin" || entry['user'] == _username) &&
+                            entry['approved'] != true)
+                          IconButton(
+                            icon: const Icon(Icons.edit, color: Colors.blue),
+                            onPressed: () => _showEditDialog(entry),
+                          ),
+                        if ((_role == "admin" || entry['user'] == _username) &&
+                            entry['approved'] != true)
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () =>
+                                _deleteEntry(entry['id'], entry['user']),
+                          ),
+                        if (_role == "admin" && entry['approved'] != true)
+                          IconButton(
+                            icon: const Icon(Icons.check, color: Colors.green),
+                            tooltip: "Approve",
+                            onPressed: () async {
+                              await ApiService.approveMaterialEntry(
+                                entryId: entry['id'],
+                                approver: _username,
+                              );
+                              await ApiService.addStock(data: entry);
+                              await _loadEntries();
+
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    "Entry approved and added to stock",
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
