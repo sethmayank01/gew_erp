@@ -300,9 +300,12 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
             ),
             ElevatedButton(
               onPressed: () async {
+                final parts = selectedMaterial!.split(" - ");
                 final updatedEntry = {
                   ...entry,
                   'material': selectedMaterial,
+                  'type': parts[0],
+                  'subtype': parts.length > 1 ? parts[1] : '',
                   'quantity': qtyController.text,
                   'price': priceController.text,
                   'make': makeController.text,
@@ -565,20 +568,33 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                             icon: const Icon(Icons.check, color: Colors.green),
                             tooltip: "Approve",
                             onPressed: () async {
-                              await ApiService.approveMaterialEntry(
-                                entryId: entry['id'],
-                                approver: _username,
-                              );
-                              await ApiService.addStock(data: entry);
-                              await _loadEntries();
+                              try {
+                                await ApiService.approveMaterialEntry(
+                                  entryId: entry['id'],
+                                  approver: _username,
+                                );
+                                //Mayank Removed as functionlity added in backend for above function
+                                //await ApiService.addStock(data: entry);
+                                await _loadEntries();
 
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    "Entry approved and added to stock",
+                                if (!mounted) return;
+
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      "Entry approved and added to stock",
+                                    ),
                                   ),
-                                ),
-                              );
+                                );
+                              } catch (e) {
+                                if (!mounted) return;
+
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text("Approval failed: $e"),
+                                  ),
+                                );
+                              }
                             },
                           ),
                       ],

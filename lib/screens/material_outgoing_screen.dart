@@ -3,6 +3,7 @@ import '../services/api_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'dart:math';
+import 'dart:async';
 import 'package:dropdown_search/dropdown_search.dart'; // <-- Add this package to pubspec.yaml
 
 class OutgoingMaterialScreen extends StatefulWidget {
@@ -39,6 +40,7 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
   // Search feature
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  Timer? _outgoingSearchTimer;
 
   @override
   void initState() {
@@ -47,14 +49,19 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
     _loadUser();
     _loadOutgoingList();
     _searchController.addListener(() {
-      setState(() {
-        _searchQuery = _searchController.text.trim().toLowerCase();
+      final search = _searchController.text.trim();
+
+      _outgoingSearchTimer?.cancel();
+
+      _outgoingSearchTimer = Timer(const Duration(milliseconds: 400), () {
+        _loadOutgoingList(search: search);
       });
     });
   }
 
   @override
   void dispose() {
+    _outgoingSearchTimer?.cancel();
     _searchController.dispose();
     _issueQtyController.dispose();
     super.dispose();
@@ -86,32 +93,24 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
     });
   }
 
-  Future<void> _loadOutgoingList() async {
-    setState(() {
-      _isLoadingOutgoing = true;
-    });
+  Future<void> _loadOutgoingList({String search = ''}) async {
+    if (!mounted) return;
+
     try {
-      final outgoing = await ApiService.getOutgoingMaterials();
-      // Sort the outgoing list by issued date (newest first)
-      List<Map<String, dynamic>> sortedOutgoing =
-          List<Map<String, dynamic>>.from(outgoing);
-      sortedOutgoing.sort((a, b) {
-        final aDate = a['out_time'] != null
-            ? DateTime.tryParse(a['out_time'])
-            : null;
-        final bDate = b['out_time'] != null
-            ? DateTime.tryParse(b['out_time'])
-            : null;
-        if (aDate == null && bDate == null) return 0;
-        if (aDate == null) return 1;
-        if (bDate == null) return -1;
-        return bDate.compareTo(aDate); // Newest to oldest
-      });
+      final outgoing = await ApiService.getOutgoingMaterials(search: search);
+
+      // Backend already returns newest first using the indexed out_time.
+      final outgoingList = List<Map<String, dynamic>>.from(outgoing);
+
+      if (!mounted) return;
+
       setState(() {
-        _outgoingList = sortedOutgoing;
+        _outgoingList = outgoingList;
         _isLoadingOutgoing = false;
       });
     } catch (e) {
+      if (!mounted) return;
+
       setState(() {
         _outgoingList = [];
         _isLoadingOutgoing = false;
@@ -278,7 +277,7 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
       );
       _issueQtyController.clear();
       await _onMaterialSelected(material);
-      await _loadOutgoingList();
+      await _loadOutgoingList(search: _searchQuery);
     } else {
       ScaffoldMessenger.of(
         context,
@@ -301,15 +300,7 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    final filteredOutgoingList = _outgoingList.where((entry) {
-      final search = _searchQuery;
-      if (search.isEmpty) return true;
-      return (entry['serialNo'] ?? '').toString().toLowerCase().contains(
-            search,
-          ) ||
-          (entry['material'] ?? '').toString().toLowerCase().contains(search) ||
-          (entry['user_out'] ?? '').toString().toLowerCase().contains(search);
-    }).toList();
+    final filteredOutgoingList = _outgoingList;
 
     return Padding(
       padding: const EdgeInsets.only(top: 32),
@@ -404,27 +395,60 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      DropdownButtonFormField<Map<String, dynamic>>(
-                        decoration: const InputDecoration(
-                          labelText: 'Select Job',
+                      DropdownSearch<Map<String, dynamic>>(
+                        items: _jobs,
+
+                        selectedItem: _selectedJob,
+
+                        itemAsString: (job) {
+                          final serialNo = job['serialNo'] ?? 'Unknown Job';
+                          final kva = job['kva'] ?? job['KVA'] ?? '';
+                          final purchaser = job['purchaserName'] ?? '';
+                          final tappingType = job['tappingType'] ?? '';
+                          final hvVolt = job['hvVoltage'] ?? '';
+                          final lvVolt = job['lvVoltage'] ?? '';
+
+                          return [
+                            serialNo,
+                            if (kva.toString().isNotEmpty) '${kva} kVA',
+                            if (tappingType.toString().isNotEmpty) tappingType,
+                            if (hvVolt.toString().isNotEmpty) '${hvVolt} V',
+                            if (lvVolt.toString().isNotEmpty) '${lvVolt} V',
+                            if (purchaser.toString().isNotEmpty) purchaser,
+                          ].join(' - ');
+                        },
+
+                        popupProps: PopupProps.menu(
+                          showSearchBox: true,
+                          searchFieldProps: TextFieldProps(
+                            decoration: const InputDecoration(
+                              hintText: 'Search job, KVA, purchaser...',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.search),
+                            ),
+                          ),
                         ),
-                        value: _selectedJob,
-                        items: _jobs
-                            .map(
-                              (job) => DropdownMenuItem(
-                                value: job,
-                                child: Text(job['serialNo'] ?? 'Unknown'),
-                              ),
-                            )
-                            .toList(),
+
+                        dropdownDecoratorProps: const DropDownDecoratorProps(
+                          dropdownSearchDecoration: InputDecoration(
+                            labelText: 'Select Job',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+
                         onChanged: (val) async {
-                          setState(() => _selectedJob = val);
+                          setState(() {
+                            _selectedJob = val;
+                          });
+
                           if (_selectedMaterial != null) {
                             await _onMaterialSelected(_selectedMaterial);
                           }
                         },
-                        validator: (val) =>
-                            val == null ? 'Please select a job' : null,
+
+                        validator: (val) {
+                          return val == null ? 'Please select a job' : null;
+                        },
                       ),
                       const SizedBox(height: 16),
                       // Updated Material Dropdown with search and alphabetic sort

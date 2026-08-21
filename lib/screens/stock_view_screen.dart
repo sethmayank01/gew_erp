@@ -61,7 +61,7 @@ class _StockViewScreenState extends State<StockViewScreen> {
       _jobStock = List<Map<String, dynamic>>.from(job);
     });
   }
-
+  /*
   Future<void> _loadJobs() async {
     final jobs = await ApiService.getOpenJobs();
     Map<String, Map<String, dynamic>> jobStockData = {};
@@ -89,6 +89,50 @@ class _StockViewScreenState extends State<StockViewScreen> {
       _jobNumbers = jobStockData.keys.toList();
       _allIndentStocks = jobStockData;
     });
+  }
+  */
+
+  Future<void> _loadJobs() async {
+    try {
+      final jobs = await ApiService.getOpenJobIndents();
+
+      Map<String, Map<String, dynamic>> jobStockData = {};
+
+      for (final job in jobs) {
+        final jobNo = job['serialNo']?.toString() ?? '';
+
+        if (jobNo.isEmpty) continue;
+
+        jobStockData[jobNo] = {
+          'purchaserName': job['purchaserName']?.toString() ?? '',
+
+          'kVA': job['kVA']?.toString() ?? '',
+
+          'tappingType': job['tappingType']?.toString() ?? '',
+
+          'hvVoltage': job['hvVoltage']?.toString() ?? '',
+
+          'lvVoltage': job['lvVoltage']?.toString() ?? '',
+
+          'entries': List<Map<String, dynamic>>.from(job['entries'] ?? []),
+        };
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _jobNumbers = jobStockData.keys.toList();
+        _allIndentStocks = jobStockData;
+      });
+    } catch (e) {
+      print('Error loading jobs: $e');
+
+      if (!mounted) return;
+
+      setState(() {
+        _allIndentStocks = {};
+      });
+    }
   }
 
   Future<void> _loadIndentQtys() async {
@@ -455,26 +499,59 @@ class _StockViewScreenState extends State<StockViewScreen> {
   Widget _buildIndentList() {
     List<Map<String, dynamic>> jobSummary = [];
 
+    final q = _searchQuery.trim().toLowerCase();
+
     for (var jobNo in _jobNumbers) {
-      final jobData = _allIndentStocks[jobNo]!;
-      final entries = jobData['entries'] as List<Map<String, dynamic>>;
+      final jobData = _allIndentStocks[jobNo];
+
+      if (jobData == null) continue;
+
+      final customer = jobData['purchaserName']?.toString() ?? '';
+      final kva = jobData['kVA']?.toString() ?? '';
+      final tappingType = jobData['tappingType']?.toString() ?? '';
+      final hvVoltage = jobData['hvVoltage']?.toString() ?? '';
+      final lvVoltage = jobData['lvVoltage']?.toString() ?? '';
+
+      // Apply search filter to Indent Stock
+      if (q.isNotEmpty) {
+        final matches =
+            jobNo.toLowerCase().contains(q) ||
+            customer.toLowerCase().contains(q) ||
+            kva.toLowerCase().contains(q) ||
+            tappingType.toLowerCase().contains(q) ||
+            hvVoltage.toLowerCase().contains(q) ||
+            lvVoltage.toLowerCase().contains(q);
+
+        if (!matches) {
+          continue;
+        }
+      }
+
+      final entries =
+          (jobData['entries'] as List?)?.cast<Map<String, dynamic>>() ??
+          <Map<String, dynamic>>[];
+
       double totalValue = 0.0;
+
       for (var entry in entries) {
-        final qty = entry['issuedQty'] ?? 0.0;
-        final price = entry['price'] ?? 0.0;
+        final qty =
+            double.tryParse(entry['issuedQty']?.toString() ?? '0') ?? 0.0;
+
+        final price = double.tryParse(entry['price']?.toString() ?? '0') ?? 0.0;
+
         totalValue += qty * price;
       }
+
       jobSummary.add({
         'job': jobNo,
-        'customer': jobData['purchaserName'] ?? '',
-        'kva': jobData['kVA'] ?? '',
-        'tappingType': jobData['tappingType'],
-        'hvVoltage': jobData['hvVoltage'],
-        'lvVoltage': jobData['lvVoltage'],
+        'customer': customer,
+        'kva': kva,
+        'tappingType': tappingType,
+        'hvVoltage': hvVoltage,
+        'lvVoltage': lvVoltage,
         'value': totalValue,
       });
     }
-
     // Sorting
     if (_indentSortByValue) {
       jobSummary.sort(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/date_time_patterns.dart';
 import '../services/api_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:dropdown_search/dropdown_search.dart';
 
 class JobIndentConsumptionScreen extends StatefulWidget {
   const JobIndentConsumptionScreen({super.key});
@@ -234,21 +235,68 @@ class _JobIndentConsumptionScreenState
               padding: const EdgeInsets.all(12.0),
               child: ListView(
                 children: [
-                  DropdownButtonFormField<String>(
-                    value: _selectedJobId,
-                    decoration: const InputDecoration(labelText: 'Select Job'),
-                    items: _jobs.map((job) {
-                      return DropdownMenuItem(
-                        value: job['serialNo'].toString(),
-                        child: Text("${job['serialNo']}"),
-                      );
-                    }).toList(),
-                    onChanged: (value) async {
+                  DropdownSearch<Map<String, dynamic>>(
+                    items: _jobs,
+
+                    selectedItem: _selectedJobId == null
+                        ? null
+                        : _jobs.cast<Map<String, dynamic>?>().firstWhere(
+                            (job) =>
+                                job?['serialNo']?.toString() == _selectedJobId,
+                            orElse: () => null,
+                          ),
+
+                    itemAsString: (job) {
+                      final serialNo = job['serialNo']?.toString() ?? '';
+                      final kva = job['kva']?.toString() ?? '';
+                      final purchaser = job['purchaserName']?.toString() ?? '';
+                      final tappingType = job['tappingType']?.toString() ?? '';
+                      final hvVoltage = job['hvVoltage']?.toString() ?? '';
+                      final lvVoltage = job['lvVoltage']?.toString() ?? '';
+
+                      return [
+                        serialNo,
+                        if (kva.isNotEmpty) '$kva kVA',
+                        if (tappingType.isNotEmpty) tappingType,
+                        if (hvVoltage.isNotEmpty) '$hvVoltage V',
+                        if (lvVoltage.isNotEmpty) '$lvVoltage V',
+                        if (purchaser.isNotEmpty) purchaser,
+                      ].join(' - ');
+                    },
+
+                    dropdownDecoratorProps: const DropDownDecoratorProps(
+                      dropdownSearchDecoration: InputDecoration(
+                        labelText: 'Select Job',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.work_outline),
+                      ),
+                    ),
+
+                    popupProps: PopupProps.menu(
+                      showSearchBox: true,
+                      searchFieldProps: const TextFieldProps(
+                        decoration: InputDecoration(
+                          hintText: 'Search job, purchaser, KVA...',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.search),
+                        ),
+                      ),
+                    ),
+
+                    onChanged: (job) async {
                       setState(() {
-                        _selectedJobId = value;
+                        _selectedJobId = job?['serialNo']?.toString();
                       });
+
                       await _fetchExistingIndentsForJob();
-                      setState(() {});
+
+                      if (mounted) {
+                        setState(() {});
+                      }
+                    },
+
+                    validator: (job) {
+                      return job == null ? 'Please select a job' : null;
                     },
                   ),
                   const SizedBox(height: 20),

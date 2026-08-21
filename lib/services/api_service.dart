@@ -169,9 +169,28 @@ class ApiService {
     return res.statusCode == 200;
   }
 
-  static Future<List<Map<String, dynamic>>> getOutgoingMaterials() async {
-    final res = await _sendRequest('GET', '/outgoing_materials');
-    return List<Map<String, dynamic>>.from(jsonDecode(res.body));
+  static Future<List<dynamic>> getOutgoingMaterials({
+    String search = '',
+  }) async {
+    try {
+      final encodedSearch = Uri.encodeQueryComponent(search.trim());
+
+      final endpoint = search.trim().isEmpty
+          ? '/outgoing_materials'
+          : '/outgoing_materials?search=$encodedSearch';
+
+      final res = await _sendRequest('GET', endpoint);
+
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body);
+      } else {
+        throw Exception(
+          'Failed to load outgoing materials: ${_extractError(res)}',
+        );
+      }
+    } catch (e) {
+      throw Exception('Error fetching outgoing materials: $e');
+    }
   }
 
   static Future<List<Map<String, dynamic>>> getMaterialIncomingEntries() async {
@@ -303,6 +322,22 @@ class ApiService {
       }
     } catch (e) {
       throw Exception('Error fetching job indents: $e');
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getOpenJobIndents() async {
+    try {
+      final res = await _sendRequest('GET', '/open_job_indents');
+
+      if (res.statusCode == 200) {
+        return List<Map<String, dynamic>>.from(jsonDecode(res.body));
+      } else {
+        throw Exception(
+          'Failed to load open job indents: ${_extractError(res)}',
+        );
+      }
+    } catch (e) {
+      throw Exception('Error fetching open job indents: $e');
     }
   }
 
