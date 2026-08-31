@@ -6,6 +6,7 @@ import '../services/api_service.dart';
 import 'dart:io' show Platform;
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:async';
+import 'package:package_info_plus/package_info_plus.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -19,16 +20,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String _username = '';
   Timer? _updateTimer;
   int timerDuration = 300;
+  String _appVersion = '';
 
   @override
   void initState() {
     super.initState();
     _loadUser();
+    _loadAppVersion();
     checkForUpdatesIfNeeded();
 
     // Then check every hour
     _updateTimer = Timer.periodic(Duration(seconds: timerDuration), (timer) {
       checkForUpdatesIfNeeded();
+    });
+  }
+
+  Future<void> _loadAppVersion() async {
+    final packageInfo = await PackageInfo.fromPlatform();
+
+    if (!mounted) return;
+
+    setState(() {
+      _appVersion = packageInfo.version;
     });
   }
 
@@ -122,7 +135,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Welcome to GEW ERP 1.2.4'),
+        title: Text(
+          _appVersion.isEmpty
+              ? 'Welcome to GEW ERP'
+              : 'Welcome to GEW ERP $_appVersion',
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),

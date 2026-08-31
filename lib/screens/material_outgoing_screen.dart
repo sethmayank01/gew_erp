@@ -487,7 +487,7 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                         },
                       ),
                       const SizedBox(height: 16),
-                      Text('Available Qty (FIFO): $_availableQty'),
+                      Text('Available Qty (LIFO): $_availableQty'),
                       Text(
                         'Indent Qty: $_indentQty (Allowed upto ${indentQtyWithTolerance.toStringAsFixed(2)})',
                       ),

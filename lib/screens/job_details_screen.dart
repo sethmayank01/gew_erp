@@ -38,8 +38,9 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
 
   final List<String> _vectorGroupOptions = [
     'Dyn11',
-    'Ynd11',
-    'Ddo',
+    'YNd11',
+    'Dd0',
+    'YNd1',
     'Not Applicable',
   ];
   final List<String> _relevantISOptions = ['IS:2026', 'IS:1180'];

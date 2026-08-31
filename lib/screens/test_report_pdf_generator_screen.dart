@@ -44,7 +44,7 @@ class _TestReportPdfGeneratorScreenState
   String? _selectedMaterial = 'Copper'; // Default to Copper
   List<Map<String, dynamic>> _jobs = [];
 
-  final List<String> _vectorGroupOptions = ['Dyn11', 'Ynd11', 'Ddo'];
+  final List<String> _vectorGroupOptions = ['Dyn11', 'YNd11', 'Dd0', 'YNd1'];
   final List<String> _relevantISOptions = ['IS:2026', 'IS:1180'];
   final List<String> _materialOptions = ['Copper', 'Aluminum'];
 

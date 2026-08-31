@@ -3,8 +3,8 @@ dart:
     enable-dot-shorthands: true
 
 name: gew_erp
-description: GEW ERP 1.2.5
-version: 1.2.5
+description: GEW ERP 1.2.7
+version: 1.2.7
 
 environment:
   sdk: '>=3.8.0 <4.0.0'
