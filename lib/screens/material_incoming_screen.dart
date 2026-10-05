@@ -33,6 +33,7 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
   List<String> _materials = [];
   List<String> _jobNumbers = [];
   List<Map<String, dynamic>> _entries = [];
+  final Set<String> _approvingEntryIds = <String>{};
 
   String _role = '';
   String _username = '';
@@ -103,6 +104,35 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
     });
 
     setState(() => _entries = entries);
+  }
+
+  Future<void> _approveEntry(Map<String, dynamic> entry) async {
+    final entryId = entry['id']?.toString();
+    if (entryId == null || _approvingEntryIds.contains(entryId)) return;
+
+    setState(() => _approvingEntryIds.add(entryId));
+
+    try {
+      await ApiService.approveMaterialEntry(
+        entryId: entryId,
+        approver: _username,
+      );
+      await _loadEntries();
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Entry approved; stock is up to date')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Approval failed: $e')));
+    } finally {
+      if (mounted) {
+        setState(() => _approvingEntryIds.remove(entryId));
+      }
+    }
   }
 
   void _handleMaterialSelection(String? value) {
@@ -535,8 +565,12 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                   ),
                 ),
               ),
-              ...filteredEntries.map(
-                (entry) => Card(
+              ...filteredEntries.map((entry) {
+                final entryId = entry['id']?.toString();
+                final isApproving =
+                    entryId != null && _approvingEntryIds.contains(entryId);
+
+                return Card(
                   child: ListTile(
                     title: Text(entry['material'] ?? ''),
                     subtitle: Text(
@@ -565,43 +599,24 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                           ),
                         if (_role == "admin" && entry['approved'] != true)
                           IconButton(
-                            icon: const Icon(Icons.check, color: Colors.green),
-                            tooltip: "Approve",
-                            onPressed: () async {
-                              try {
-                                await ApiService.approveMaterialEntry(
-                                  entryId: entry['id'],
-                                  approver: _username,
-                                );
-                                //Mayank Removed as functionlity added in backend for above function
-                                //await ApiService.addStock(data: entry);
-                                await _loadEntries();
-
-                                if (!mounted) return;
-
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      "Entry approved and added to stock",
+                            icon: isApproving
+                                ? const SizedBox.square(
+                                    dimension: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
                                     ),
-                                  ),
-                                );
-                              } catch (e) {
-                                if (!mounted) return;
-
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text("Approval failed: $e"),
-                                  ),
-                                );
-                              }
-                            },
+                                  )
+                                : const Icon(Icons.check, color: Colors.green),
+                            tooltip: "Approve",
+                            onPressed: isApproving
+                                ? null
+                                : () => _approveEntry(entry),
                           ),
                       ],
                     ),
                   ),
-                ),
-              ),
+                );
+              }),
             ],
           ),
         ),
