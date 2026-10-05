@@ -8,6 +8,7 @@ import json
 import uuid
 import os
 import sys
+from datetime import datetime, timezone
 
 app = Flask(__name__)
 CORS(app)
@@ -763,6 +764,11 @@ def approve_material_entry(entry_id):
     data = request.json or {}
     approver = data.get('approver')
 
+    if not approver:
+        return jsonify({
+            'error': 'Approver is required'
+        }), 400
+
     conn = None
     cur = None
 
@@ -778,6 +784,7 @@ def approve_material_entry(entry_id):
             SELECT data
             FROM incoming_materials
             WHERE id = %s
+            FOR UPDATE
             ''',
             (entry_id,)
         )
@@ -796,17 +803,15 @@ def approve_material_entry(entry_id):
         # ---------------------------------------------------------
         if entry.get('approved', False):
             return jsonify({
-                'error': 'Already approved'
-            }), 400
+                'message': 'Entry already approved; stock unchanged'
+            }), 200
 
         # ---------------------------------------------------------
         # 3. Prepare approval information
         # ---------------------------------------------------------
         entry['approved'] = True
         entry['approved_by'] = approver
-
-        # Keep this if your incoming data already has it
-        # entry['approved_at'] = datetime.now().isoformat()
+        entry['approved_at'] = datetime.now(timezone.utc).isoformat()
 
         # ---------------------------------------------------------
         # 4. Build stock key
@@ -829,7 +834,11 @@ def approve_material_entry(entry_id):
         # ---------------------------------------------------------
         # 5. Create stock ID
         # ---------------------------------------------------------
-        stock_id = str(uuid.uuid4())
+        # Reuse the incoming ID so the stock primary key is also an
+        # idempotency key for this approval.
+        stock_id = entry_id
+        stock_data = dict(entry)
+        stock_data['incomingEntryId'] = entry_id
 
         # ---------------------------------------------------------
         # 6. Update incoming entry as approved
@@ -861,7 +870,7 @@ def approve_material_entry(entry_id):
             (
                 stock_id,
                 key,
-                jsonb(entry)
+                jsonb(stock_data)
             )
         )
 
@@ -1218,6 +1227,13 @@ def add_stock():
             'error': 'Missing stock data'
         }), 400
 
+    # Older clients called this endpoint for incoming entries as well as the
+    # approval endpoint. Incoming stock must only be created by approval.
+    if 'approved' in data:
+        return jsonify({
+            'error': 'Incoming stock is created by the approval endpoint'
+        }), 409
+
     stock_id = str(uuid.uuid4())
 
     job_specific = data.get(
@@ -1311,34 +1327,22 @@ def delete_stock_entry():
 
         payload = request.json.get('data')
 
+        if not payload:
+            return jsonify({
+                'error': 'Missing stock data'
+            }), 400
+
         print(
             "Payload: %s",
             payload
         )
 
-        m_type = payload.get('type')
-        subtype = payload.get('subtype')
-        serial_no = payload.get('serialNo', None)
-        is_job_specific = payload.get('jobSpecific')
+        stock_id = payload.get('id')
 
-        if not m_type or not subtype:
+        if not stock_id:
 
             return jsonify({
-                'error': 'Missing type or subtype'
-            }), 401
-
-        key = f"{m_type} - {subtype}"
-
-        if is_job_specific and serial_no:
-
-            key = f"{key} - {serial_no}"
-
-        invoice = payload.get('invoice')
-
-        if not key or not invoice:
-
-            return jsonify({
-                'error': 'Missing key or invoice'
+                'error': 'Missing stock id'
             }), 400
 
         conn = get_db_connection()
@@ -1346,38 +1350,32 @@ def delete_stock_entry():
 
         cur.execute(
             '''
-            SELECT *
-            FROM stock
-            WHERE key = %s
-              AND data->>'invoice' = %s
+            DELETE FROM stock
+            WHERE id = %s
             ''',
-            (
-                key,
-                invoice
-            )
+            (stock_id,)
         )
 
-        result = cur.fetchone()
+        deleted_count = cur.rowcount
 
-        if not result:
+        # Before stock IDs were tied to incoming IDs, the only stable source
+        # identity stored in both records was the exact entry timestamp.
+        if deleted_count == 0 and payload.get('entryDate'):
+            cur.execute(
+                '''
+                DELETE FROM stock
+                WHERE data->>'entryDate' = %s
+                ''',
+                (payload.get('entryDate'),)
+            )
+            deleted_count = cur.rowcount
 
+        if deleted_count == 0:
+            conn.rollback()
             conn.close()
-
             return jsonify({
                 'error': 'No matching record found'
             }), 404
-
-        cur.execute(
-            '''
-            DELETE FROM stock
-            WHERE key = %s
-              AND data->>'invoice' = %s
-            ''',
-            (
-                key,
-                invoice
-            )
-        )
 
         conn.commit()
 
@@ -1407,19 +1405,19 @@ def update_stock():
     updated_price = request.json.get('price')
     edit_stock = request.json.get('editFlag')
 
-    if not data and issue_quantity:
+    if not data or issue_quantity is None:
 
         return jsonify({
             'error': 'Missing stock data or quantity'
         }), 400
 
-    material = data.get('material')
+    stock_id = data.get('id')
 
-    if not material:
+    if not stock_id:
 
         return jsonify({
-            'error': 'material field required'
-        }), 401
+            'error': 'stock id required'
+        }), 400
 
     job_specific = data.get(
         'jobSpecific',
@@ -1431,16 +1429,11 @@ def update_stock():
         None
     )
 
-    invoice = data.get(
-        'invoice',
-        None
-    )
-
-    key = material
+    key = data.get('key') or data.get('material')
 
     if job_specific and serial_no:
 
-        key = f"{material} - {serial_no}"
+        key = f"{data.get('material')} - {serial_no}"
 
     try:
 
@@ -1451,13 +1444,10 @@ def update_stock():
             '''
             SELECT id, data
             FROM stock
-            WHERE key = %s
-              AND data->>'invoice' = %s
+            WHERE id = %s
+            FOR UPDATE
             ''',
-            (
-                key,
-                invoice
-            )
+            (stock_id,)
         )
 
         row = cur.fetchone()
@@ -1519,13 +1509,11 @@ def update_stock():
             '''
             UPDATE stock
             SET data = %s
-            WHERE key = %s
-              AND data->>'invoice' = %s
+            WHERE id = %s
             ''',
             (
                 jsonb(existing_data),
-                key,
-                invoice
+                stock_id
             )
         )
 
@@ -1652,7 +1640,7 @@ def get_stock():
 
         cur.execute(
             '''
-            SELECT key, data
+            SELECT id, key, data
             FROM stock
             ORDER BY key
             '''
@@ -1667,30 +1655,22 @@ def get_stock():
 
         for row in rows:
 
-            key = row[0]
+            stock_id = row[0]
+            key = row[1]
 
             data = parse_json_data(
-                row[1]
+                row[2]
             )
 
             if not isinstance(data, dict):
                 continue
 
+            data['id'] = stock_id
             data['key'] = key
 
-            # Existing application logic:
-            #
-            # General stock:
-            #     no serialNo
-            #
-            # Job-specific stock:
-            #     serialNo exists
+            item_is_job_specific = data.get('jobSpecific') is True
 
-            has_serial_no = (
-                'serialNo' in data
-            )
-
-            if has_serial_no == is_job_specific:
+            if item_is_job_specific == is_job_specific:
 
                 stock_list.append(data)
 
