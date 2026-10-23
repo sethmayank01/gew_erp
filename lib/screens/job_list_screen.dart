@@ -315,7 +315,7 @@ class _JobListScreenState extends State<JobListScreen> {
                     'KVA: ${job['kva'] ?? '-'} | Phases: ${job['phases'] ?? '-'}',
                   ),
                   Text(
-                    'HV: ${job['hvVoltage'] ?? '-'} | LV: ${job['lvVoltage'] ?? '-'}',
+                    'HV: ${job['hvVoltage'] ?? '-'} | LV: ${_lvVoltageText(job)}',
                   ),
                   Text('Dispatched: ${_formatDate(job['dispatchDate'])}'),
                   Text('Final: ${job['isFinal'] == true ? 'Yes' : 'No'}'),
@@ -365,7 +365,7 @@ class _JobListScreenState extends State<JobListScreen> {
             _buildDetailRow('KVA', job['kva']),
             _buildDetailRow('Phases', job['phases']),
             _buildDetailRow('HV Voltage', job['hvVoltage']),
-            _buildDetailRow('LV Voltage', job['lvVoltage']),
+            _buildDetailRow('LV Voltage', _lvVoltageText(job)),
             _buildDetailRow('Vector Group', job['vectorGroup']),
             _buildDetailRow('IS', job['relevantIS']),
             _buildDetailRow('Tapping Type', job['tappingType']),
@@ -420,6 +420,12 @@ class _JobListScreenState extends State<JobListScreen> {
         ],
       ),
     );
+  }
+
+  String _lvVoltageText(Map<String, dynamic> job) {
+    final first = job['lvVoltage']?.toString() ?? '-';
+    final second = job['lv2Voltage']?.toString().trim() ?? '';
+    return second.isEmpty ? first : '$first-$second';
   }
 
   // Wide table headers for desktop/tablet
@@ -489,7 +495,7 @@ class _JobListScreenState extends State<JobListScreen> {
         _buildCell(job['kva'], narrowWidth),
         _buildCell(job['phases'], narrowWidth),
         _buildCell(job['hvVoltage'], narrowWidth),
-        _buildCell(job['lvVoltage'], narrowWidth),
+        _buildCell(_lvVoltageText(job), narrowWidth),
         _buildCell(job['vectorGroup'], narrowWidth),
         _buildCell(job['relevantIS'], narrowWidth),
         _buildCell(job['tappingType'], narrowWidth),

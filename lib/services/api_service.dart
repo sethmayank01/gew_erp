@@ -6,6 +6,13 @@ import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+class OutgoingIssueRejected implements Exception {
+  final String message;
+  OutgoingIssueRejected(this.message);
+  @override
+  String toString() => message;
+}
+
 class ApiService {
   //static const String lanUrl = 'http://192.168.2.205:5000';
   static const String lanUrl = 'http://192.168.2.205:5005';
@@ -61,11 +68,18 @@ class ApiService {
   }
 
   static Future<Map<String, dynamic>?> fetchVersionInfo() async {
-    final res = await http.get(Uri.parse(versionUrl));
-    if (res.statusCode == 200) {
-      return jsonDecode(res.body);
+    final client = http.Client();
+    try {
+      final res = await client
+          .get(Uri.parse(versionUrl))
+          .timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) {
+        return Map<String, dynamic>.from(jsonDecode(res.body) as Map);
+      }
+      return null;
+    } finally {
+      client.close();
     }
-    return null;
   }
 
   static Future<String> getCurrentAppVersion() async {
@@ -165,8 +179,15 @@ class ApiService {
   }
 
   static Future<bool> saveOutgoingMaterial(Map<String, dynamic> data) async {
-    final res = await _sendRequest('POST', '/outgoing_materials', body: data);
-    return res.statusCode == 200;
+    final res = await _sendRequest(
+      'POST',
+      '/outgoing_materials/issue',
+      body: data,
+    );
+    if (res.statusCode != 200) {
+      throw OutgoingIssueRejected(_extractError(res));
+    }
+    return true;
   }
 
   static Future<List<dynamic>> getOutgoingMaterials({

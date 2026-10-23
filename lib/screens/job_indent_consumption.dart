@@ -23,6 +23,7 @@ class _JobIndentConsumptionScreenState
   String _role = '';
   String _username = '';
   bool _isLoading = true;
+  bool _isSubmitting = false;
   String _searchText = '';
   String? _error;
   Map<String, Map<String, dynamic>> _existingIndents = {};
@@ -116,13 +117,30 @@ class _JobIndentConsumptionScreenState
   }
 
   Future<void> _submitIndent() async {
+    if (_isSubmitting) return;
     if (_selectedJobId == null) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text("Please select a job.")));
       return;
     }
+    setState(() => _isSubmitting = true);
+    try {
+      await _saveIndent();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to submit indent: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  Future<void> _saveIndent() async {
     await _fetchExistingIndentsForJob();
+    if (!mounted) return;
 
     List<Map<String, dynamic>> indentsToCreate = [];
     List<Map<String, dynamic>> indentsToUpdate = [];
@@ -134,7 +152,7 @@ class _JobIndentConsumptionScreenState
 
       final existingIndent = _existingIndents[id];
 
-      if (qty != null && qty > 0) {
+      if (qty != null && qty.isFinite && qty > 0) {
         final type = material['type'];
         final subtype = material['subtype'];
         final materialKey = "$type - $subtype";
@@ -187,7 +205,9 @@ class _JobIndentConsumptionScreenState
     // Update existing indents (for admin)
     for (var indent in indentsToUpdate) {
       try {
-        await ApiService.updateExistingJobIndent(data: indent);
+        final result = await ApiService.updateExistingJobIndent(data: indent);
+        if (!mounted) return;
+        if (result != 'Success') throw Exception(result);
       } catch (e) {
         allSuccess = false;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -201,6 +221,7 @@ class _JobIndentConsumptionScreenState
     // Submit new indents
     if (indentsToCreate.isNotEmpty) {
       final success = await ApiService.submitJobIndent(indentsToCreate);
+      if (!mounted) return;
       allSuccess = allSuccess && success;
     }
 
@@ -213,6 +234,7 @@ class _JobIndentConsumptionScreenState
       _qtyControllers.values.forEach((c) => c.clear());
       _descControllers.values.forEach((c) => c.clear());
       await _fetchExistingIndentsForJob();
+      if (!mounted) return;
       setState(() {});
     } else {
       ScaffoldMessenger.of(
@@ -233,172 +255,184 @@ class _JobIndentConsumptionScreenState
             )
           : Padding(
               padding: const EdgeInsets.all(12.0),
-              child: ListView(
-                children: [
-                  DropdownSearch<Map<String, dynamic>>(
-                    items: _jobs,
+              child: AbsorbPointer(
+                absorbing: _isSubmitting,
+                child: ListView(
+                  children: [
+                    DropdownSearch<Map<String, dynamic>>(
+                      items: _jobs,
 
-                    selectedItem: _selectedJobId == null
-                        ? null
-                        : _jobs.cast<Map<String, dynamic>?>().firstWhere(
-                            (job) =>
-                                job?['serialNo']?.toString() == _selectedJobId,
-                            orElse: () => null,
+                      selectedItem: _selectedJobId == null
+                          ? null
+                          : _jobs.cast<Map<String, dynamic>?>().firstWhere(
+                              (job) =>
+                                  job?['serialNo']?.toString() ==
+                                  _selectedJobId,
+                              orElse: () => null,
+                            ),
+
+                      itemAsString: (job) {
+                        final serialNo = job['serialNo']?.toString() ?? '';
+                        final kva = job['kva']?.toString() ?? '';
+                        final purchaser =
+                            job['purchaserName']?.toString() ?? '';
+                        final tappingType =
+                            job['tappingType']?.toString() ?? '';
+                        final hvVoltage = job['hvVoltage']?.toString() ?? '';
+                        final lvVoltage = job['lvVoltage']?.toString() ?? '';
+
+                        return [
+                          serialNo,
+                          if (kva.isNotEmpty) '$kva kVA',
+                          if (tappingType.isNotEmpty) tappingType,
+                          if (hvVoltage.isNotEmpty) '$hvVoltage V',
+                          if (lvVoltage.isNotEmpty) '$lvVoltage V',
+                          if (purchaser.isNotEmpty) purchaser,
+                        ].join(' - ');
+                      },
+
+                      dropdownDecoratorProps: const DropDownDecoratorProps(
+                        dropdownSearchDecoration: InputDecoration(
+                          labelText: 'Select Job',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.work_outline),
+                        ),
+                      ),
+
+                      popupProps: PopupProps.menu(
+                        showSearchBox: true,
+                        searchFieldProps: const TextFieldProps(
+                          decoration: InputDecoration(
+                            hintText: 'Search job, purchaser, KVA...',
+                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(Icons.search),
                           ),
+                        ),
+                      ),
 
-                    itemAsString: (job) {
-                      final serialNo = job['serialNo']?.toString() ?? '';
-                      final kva = job['kva']?.toString() ?? '';
-                      final purchaser = job['purchaserName']?.toString() ?? '';
-                      final tappingType = job['tappingType']?.toString() ?? '';
-                      final hvVoltage = job['hvVoltage']?.toString() ?? '';
-                      final lvVoltage = job['lvVoltage']?.toString() ?? '';
+                      onChanged: (job) async {
+                        setState(() {
+                          _selectedJobId = job?['serialNo']?.toString();
+                        });
 
-                      return [
-                        serialNo,
-                        if (kva.isNotEmpty) '$kva kVA',
-                        if (tappingType.isNotEmpty) tappingType,
-                        if (hvVoltage.isNotEmpty) '$hvVoltage V',
-                        if (lvVoltage.isNotEmpty) '$lvVoltage V',
-                        if (purchaser.isNotEmpty) purchaser,
-                      ].join(' - ');
-                    },
+                        await _fetchExistingIndentsForJob();
 
-                    dropdownDecoratorProps: const DropDownDecoratorProps(
-                      dropdownSearchDecoration: InputDecoration(
-                        labelText: 'Select Job',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.work_outline),
+                        if (mounted) {
+                          setState(() {});
+                        }
+                      },
+
+                      validator: (job) {
+                        return job == null ? 'Please select a job' : null;
+                      },
+                    ),
+                    const SizedBox(height: 20),
+                    const Text(
+                      "Materials",
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-
-                    popupProps: PopupProps.menu(
-                      showSearchBox: true,
-                      searchFieldProps: const TextFieldProps(
-                        decoration: InputDecoration(
-                          hintText: 'Search job, purchaser, KVA...',
+                    const SizedBox(height: 8),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8.0),
+                      child: TextField(
+                        decoration: const InputDecoration(
+                          labelText: 'Search Material (type and subtype)',
                           border: OutlineInputBorder(),
                           prefixIcon: Icon(Icons.search),
                         ),
+                        onChanged: _onSearchChanged,
                       ),
                     ),
-
-                    onChanged: (job) async {
-                      setState(() {
-                        _selectedJobId = job?['serialNo']?.toString();
-                      });
-
-                      await _fetchExistingIndentsForJob();
-
-                      if (mounted) {
-                        setState(() {});
-                      }
-                    },
-
-                    validator: (job) {
-                      return job == null ? 'Please select a job' : null;
-                    },
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    "Materials",
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8.0),
-                    child: TextField(
-                      decoration: const InputDecoration(
-                        labelText: 'Search Material (type and subtype)',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.search),
-                      ),
-                      onChanged: _onSearchChanged,
-                    ),
-                  ),
-                  _filteredMaterials.isEmpty
-                      ? const Center(child: Text('No materials found.'))
-                      : Column(
-                          children: _filteredMaterials.map((material) {
-                            final id = _materialId(material);
-                            final existingIndent = _existingIndents[id];
-                            return Card(
-                              margin: const EdgeInsets.symmetric(vertical: 6),
-                              child: Padding(
-                                padding: const EdgeInsets.all(8.0),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      "${material['type']} - ${material['subtype']}",
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    if (existingIndent != null)
-                                      Padding(
-                                        padding: const EdgeInsets.only(
-                                          bottom: 4.0,
-                                          top: 2.0,
+                    _filteredMaterials.isEmpty
+                        ? const Center(child: Text('No materials found.'))
+                        : Column(
+                            children: _filteredMaterials.map((material) {
+                              final id = _materialId(material);
+                              final existingIndent = _existingIndents[id];
+                              return Card(
+                                margin: const EdgeInsets.symmetric(vertical: 6),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(8.0),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        "${material['type']} - ${material['subtype']}",
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
                                         ),
-                                        child: Row(
-                                          children: [
-                                            const Icon(
-                                              Icons.info,
-                                              color: Colors.blue,
-                                              size: 18,
-                                            ),
-                                            const SizedBox(width: 6),
-                                            Expanded(
-                                              child: Text(
-                                                "Existing Indent: Qty = ${existingIndent['quantity']}  Desc: ${existingIndent['description'] ?? ''}",
-                                                style: const TextStyle(
-                                                  color: Colors.blue,
-                                                  fontStyle: FontStyle.italic,
+                                      ),
+                                      if (existingIndent != null)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            bottom: 4.0,
+                                            top: 2.0,
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              const Icon(
+                                                Icons.info,
+                                                color: Colors.blue,
+                                                size: 18,
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Expanded(
+                                                child: Text(
+                                                  "Existing Indent: Qty = ${existingIndent['quantity']}  Desc: ${existingIndent['description'] ?? ''}",
+                                                  style: const TextStyle(
+                                                    color: Colors.blue,
+                                                    fontStyle: FontStyle.italic,
+                                                  ),
                                                 ),
                                               ),
-                                            ),
-                                          ],
+                                            ],
+                                          ),
                                         ),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: TextField(
+                                              controller: _qtyControllers[id],
+                                              keyboardType:
+                                                  const TextInputType.numberWithOptions(
+                                                    decimal: true,
+                                                  ),
+                                              decoration: const InputDecoration(
+                                                labelText: "Indent Quantity",
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: TextField(
+                                              controller: _descControllers[id],
+                                              decoration: const InputDecoration(
+                                                labelText: "Description",
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: TextField(
-                                            controller: _qtyControllers[id],
-                                            keyboardType:
-                                                const TextInputType.numberWithOptions(
-                                                  decimal: true,
-                                                ),
-                                            decoration: const InputDecoration(
-                                              labelText: "Indent Quantity",
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 10),
-                                        Expanded(
-                                          child: TextField(
-                                            controller: _descControllers[id],
-                                            decoration: const InputDecoration(
-                                              labelText: "Description",
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                  const SizedBox(height: 20),
-                  ElevatedButton.icon(
-                    onPressed: _submitIndent,
-                    icon: const Icon(Icons.save),
-                    label: const Text("Submit Indent"),
-                  ),
-                ],
+                              );
+                            }).toList(),
+                          ),
+                    const SizedBox(height: 20),
+                    ElevatedButton.icon(
+                      onPressed: _isSubmitting ? null : _submitIndent,
+                      icon: const Icon(Icons.save),
+                      label: Text(
+                        _isSubmitting ? 'Submitting...' : 'Submit Indent',
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
     );

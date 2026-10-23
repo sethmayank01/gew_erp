@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'second_input_screen.dart';
 import 'package:go_router/go_router.dart';
 import '../services/api_service.dart';
+import '../models/transformer_vector_group.dart';
 
 class TestReportPdfGeneratorScreen extends StatefulWidget {
   final Map<String, dynamic>? generalData;
@@ -32,19 +33,22 @@ class _TestReportPdfGeneratorScreenState
   final _phasesController = TextEditingController();
   final _hvVoltageController = TextEditingController();
   final _lvVoltageController = TextEditingController();
+  final _lv2VoltageController = TextEditingController();
   final _tapMaxController = TextEditingController();
   final _tapMinController = TextEditingController();
   final _stepVoltageController = TextEditingController();
   final _tappingType = TextEditingController();
 
-  String? _selectedVectorGroup;
+  String? _selectedVectorGroup = TransformerVectorGroup.supportedNames.first;
+  final _vectorGroupController = TextEditingController(text: 'Dyn11');
   String? _selectedRelevantIS;
   String? _selectedJobNo;
   String? _remark;
   String? _selectedMaterial = 'Copper'; // Default to Copper
   List<Map<String, dynamic>> _jobs = [];
 
-  final List<String> _vectorGroupOptions = ['Dyn11', 'YNd11', 'Dd0', 'YNd1'];
+  final List<String> _vectorGroupOptions =
+      TransformerVectorGroup.supportedNames;
   final List<String> _relevantISOptions = ['IS:2026', 'IS:1180'];
   final List<String> _materialOptions = ['Copper', 'Aluminum'];
 
@@ -76,6 +80,7 @@ class _TestReportPdfGeneratorScreenState
     _phasesController.text = data['phases'] ?? '';
     _hvVoltageController.text = data['hvVoltage'] ?? '';
     _lvVoltageController.text = data['lvVoltage'] ?? '';
+    _lv2VoltageController.text = data['lv2Voltage'] ?? '';
     _tappingType.text = data['tappingType'] ?? '';
     if (data['tappingType'] != "No Tapping") {
       _tapMaxController.text = data['tappingRangeMax']?.toString() ?? '';
@@ -83,6 +88,7 @@ class _TestReportPdfGeneratorScreenState
       _stepVoltageController.text = data['stepVoltage']?.toString() ?? '';
     }
     _selectedVectorGroup = data['vectorGroup'];
+    _vectorGroupController.text = _selectedVectorGroup ?? 'Dyn11';
     _selectedRelevantIS = data['relevantIS'];
     _remark = data['remark'] ?? '';
     // Material prefill with fallback to Copper if not present or null/empty/invalid
@@ -92,6 +98,35 @@ class _TestReportPdfGeneratorScreenState
     } else {
       _selectedMaterial = 'Copper';
     }
+  }
+
+  TransformerVectorGroup get _vectorConfig {
+    try {
+      return TransformerVectorGroup.fromName(_selectedVectorGroup);
+    } on FormatException {
+      return TransformerVectorGroup.fromName('Dyn11');
+    }
+  }
+
+  bool get _hasDualOutput => _vectorConfig.hasDualOutput;
+
+  @override
+  void dispose() {
+    _purchaserNameController.dispose();
+    _purchaserRefController.dispose();
+    _serialNoController.dispose();
+    _dateOfTestingController.dispose();
+    _kvaController.dispose();
+    _phasesController.dispose();
+    _hvVoltageController.dispose();
+    _lvVoltageController.dispose();
+    _lv2VoltageController.dispose();
+    _tapMaxController.dispose();
+    _tapMinController.dispose();
+    _stepVoltageController.dispose();
+    _tappingType.dispose();
+    _vectorGroupController.dispose();
+    super.dispose();
   }
 
   void _submitForm() {
@@ -126,13 +161,14 @@ class _TestReportPdfGeneratorScreenState
       'dateOfTesting': _dateOfTestingController.text,
       'kva': _kvaController.text,
       'phases': _phasesController.text,
-      'vectorGroup': _selectedVectorGroup,
+      'vectorGroup': _vectorGroupController.text.trim(),
       'relevantIS': _selectedRelevantIS,
       'tappingRangeMax': maxTap,
       'tappingRangeMin': minTap,
       'stepVoltage': stepVoltage,
       'hvVoltage': _hvVoltageController.text,
       'lvVoltage': _lvVoltageController.text,
+      if (_hasDualOutput) 'lv2Voltage': _lv2VoltageController.text,
       'material': _selectedMaterial ?? 'Copper',
       'remark': _remark,
     };
@@ -221,12 +257,7 @@ class _TestReportPdfGeneratorScreenState
                     ),
                     _buildField(_kvaController, 'KVA'),
                     _buildField(_phasesController, 'Phases'),
-                    _buildDropdownField(
-                      'Vector Group',
-                      _vectorGroupOptions,
-                      _selectedVectorGroup,
-                      (val) => setState(() => _selectedVectorGroup = val),
-                    ),
+                    _buildVectorGroupField(),
                     _buildDropdownField(
                       'Relevant IS',
                       _relevantISOptions,
@@ -234,7 +265,15 @@ class _TestReportPdfGeneratorScreenState
                       (val) => setState(() => _selectedRelevantIS = val),
                     ),
                     _buildField(_hvVoltageController, 'HV Voltage'),
-                    _buildField(_lvVoltageController, 'LV Voltage'),
+                    _buildField(
+                      _lvVoltageController,
+                      '${_vectorConfig.outputLabel(0)} Voltage',
+                    ),
+                    if (_hasDualOutput)
+                      _buildField(
+                        _lv2VoltageController,
+                        '${_vectorConfig.outputLabel(1)} Voltage',
+                      ),
                     _buildField(_tapMaxController, 'Tapping Max'),
                     _buildField(_tapMinController, 'Tapping Min'),
                     _buildField(_stepVoltageController, 'Step Voltage'),
@@ -277,6 +316,43 @@ class _TestReportPdfGeneratorScreenState
         ),
         validator: (value) =>
             value == null || value.isEmpty ? 'Required' : null,
+      ),
+    );
+  }
+
+  Widget _buildVectorGroupField() {
+    return SizedBox(
+      width: MediaQuery.of(context).size.width / 2 - 24,
+      child: TextFormField(
+        controller: _vectorGroupController,
+        onChanged: (value) {
+          setState(() => _selectedVectorGroup = value);
+        },
+        decoration: InputDecoration(
+          labelText: 'Vector Group',
+          isDense: true,
+          border: const OutlineInputBorder(),
+          suffixIcon: PopupMenuButton<String>(
+            tooltip: 'Vector groups',
+            icon: const Icon(Icons.arrow_drop_down),
+            itemBuilder: (context) => _vectorGroupOptions
+                .map((name) => PopupMenuItem(value: name, child: Text(name)))
+                .toList(),
+            onSelected: (value) {
+              _vectorGroupController.text = value;
+              setState(() => _selectedVectorGroup = value);
+            },
+          ),
+        ),
+        validator: (value) {
+          if (value == null || value.trim().isEmpty) return 'Required';
+          try {
+            TransformerVectorGroup.fromName(value);
+            return null;
+          } on FormatException catch (error) {
+            return error.message;
+          }
+        },
       ),
     );
   }

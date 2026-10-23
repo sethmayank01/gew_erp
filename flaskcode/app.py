@@ -9,6 +9,8 @@ import uuid
 import os
 import sys
 from datetime import datetime, timezone
+from stock_issue import IssueError, issue_material, update_stock_lot
+from indent_submission import IndentSubmissionError, submit_indents
 
 app = Flask(__name__)
 CORS(app)
@@ -1099,6 +1101,26 @@ def update_material_incoming_entry(entry_id):
 # OUTGOING MATERIALS
 # ============================================================
 
+@app.route('/outgoing_materials/issue', methods=['POST'])
+def issue_outgoing_material():
+    conn = None
+    try:
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({'error': 'Missing outgoing material data'}), 400
+        conn = get_db_connection()
+        with conn:
+            result = issue_material(conn, data)
+        return jsonify({'id': result['id'], 'message': 'Material issued'}), 200
+    except (IssueError, ValueError, TypeError) as e:
+        return jsonify({'error': str(e)}), 409
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 @app.route('/outgoing_materials', methods=['POST'])
 def submit_material_outgoing():
 
@@ -1399,212 +1421,22 @@ def delete_stock_entry():
 
 @app.route('/stock/update', methods=['POST'])
 def update_stock():
-
-    data = request.json.get('data')
-    issue_quantity = request.json.get('quantity')
-    updated_price = request.json.get('price')
-    edit_stock = request.json.get('editFlag')
-
-    if not data or issue_quantity is None:
-
-        return jsonify({
-            'error': 'Missing stock data or quantity'
-        }), 400
-
-    stock_id = data.get('id')
-
-    if not stock_id:
-
-        return jsonify({
-            'error': 'stock id required'
-        }), 400
-
-    job_specific = data.get(
-        'jobSpecific',
-        False
-    )
-
-    serial_no = data.get(
-        'serialNo',
-        None
-    )
-
-    key = data.get('key') or data.get('material')
-
-    if job_specific and serial_no:
-
-        key = f"{data.get('material')} - {serial_no}"
-
+    conn = None
     try:
-
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({'error': 'Missing stock data'}), 400
         conn = get_db_connection()
-        cur = conn.cursor()
-
-        cur.execute(
-            '''
-            SELECT id, data
-            FROM stock
-            WHERE id = %s
-            FOR UPDATE
-            ''',
-            (stock_id,)
-        )
-
-        row = cur.fetchone()
-
-        if row:
-
-            existing_data = parse_json_data(
-                row[1]
-            )
-
-        else:
-
-            existing_data = None
-
-        if existing_data is None:
-
-            return jsonify({
-                'error': 'Stock entry not found'
-            }), 404
-
-        # ----------------------------------------------------
-        # Update current stock quantity
-        # ----------------------------------------------------
-
-        if edit_stock != True:
-
-            current_qty = parse_float(
-                existing_data.get(
-                    'quantity',
-                    0.0
-                )
-            )
-
-            new_qty = max(
-                0.0,
-                current_qty -
-                parse_float(issue_quantity)
-            )
-
-            existing_data['quantity'] = new_qty
-
-        else:
-
-            existing_data['quantity'] = parse_float(
-                issue_quantity
-            )
-
-            existing_data['price'] = parse_float(
-                updated_price
-            )
-
-        print(
-            "STOCK %s New Quantity %s",
-            existing_data,
-            parse_float(issue_quantity)
-        )
-
-        cur.execute(
-            '''
-            UPDATE stock
-            SET data = %s
-            WHERE id = %s
-            ''',
-            (
-                jsonb(existing_data),
-                stock_id
-            )
-        )
-
-        # ----------------------------------------------------
-        # Update indent stock
-        # ----------------------------------------------------
-
-        if edit_stock != True:
-
-            cur.execute(
-                '''
-                SELECT data
-                FROM indent_stock
-                WHERE key = %s
-                ''',
-                (key,)
-            )
-
-            indentrow = cur.fetchone()
-
-            if indentrow:
-
-                indentrow = parse_json_data(
-                    indentrow[0]
-                )
-
-            else:
-
-                indentrow = None
-
-            if indentrow is not None:
-
-                print(
-                    "INDENT STOCK %s,%s",
-                    indentrow,
-                    issue_quantity,
-                    key
-                )
-
-                if float(
-                    indentrow.get(
-                        'indentQuantity',
-                        0.0
-                    )
-                ) > 0.0:
-
-                    indentrow['indentQuantity'] = (
-                        float(
-                            indentrow.get(
-                                'indentQuantity',
-                                0.0
-                            )
-                        )
-                        -
-                        float(issue_quantity)
-                    )
-
-                cur.execute(
-                    '''
-                    UPDATE indent_stock
-                    SET data = %s
-                    WHERE key = %s
-                    ''',
-                    (
-                        jsonb(indentrow),
-                        key
-                    )
-                )
-
-        conn.commit()
-
-        cur.close()
-        conn.close()
-
-        return jsonify({
-            'message': 'Stock updated'
-        }), 200
-
+        with conn:
+            update_stock_lot(conn, payload)
+        return jsonify({'message': 'Stock updated'}), 200
+    except (IssueError, ValueError, TypeError) as e:
+        return jsonify({'error': str(e)}), 409
     except Exception as e:
-
-        exc_type, exc_obj, tb = sys.exc_info()
-
-        line_number = tb.tb_lineno
-
-        print(
-            f"Exception: {e} at line {line_number}"
-        )
-
-        return jsonify({
-            'error': str(e)
-        }), 500
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 @app.route('/indent_stock', methods=['GET'])
@@ -1770,168 +1602,22 @@ def save_stock():
 
 @app.route('/job_indents', methods=['POST'])
 def submit_job_indent():
-
-    data = request.json.get(
-        'data'
-    )
-
-    if (
-        not data
-        or not isinstance(data, list)
-    ):
-
-        return jsonify({
-            'error': 'List of indents expected'
-        }), 400
-
+    payload = request.get_json(silent=True)
+    data = payload.get('data') if isinstance(payload, dict) else None
+    conn = None
     try:
-
         conn = get_db_connection()
-        cur = conn.cursor()
-
-        for indent in data:
-
-            jobid = indent.get(
-                'serialNo'
-            )
-
-            matType = indent.get(
-                'type'
-            )
-
-            subType = indent.get(
-                'subtype'
-            )
-
-            job_specific = (
-                indent.get(
-                    'jobSpecific'
-                ) is True
-            )
-
-            indentquantity = indent.get(
-                'quantity'
-            )
-
-            if not jobid:
-                continue
-
-            if job_specific:
-
-                stock_key = (
-                    f"{matType} - "
-                    f"{subType} - "
-                    f"{jobid}"
-                )
-
-            else:
-
-                stock_key = (
-                    f"{matType} - "
-                    f"{subType}"
-                )
-
-            # ------------------------------------------------
-            # Fetch indent stock
-            # ------------------------------------------------
-
-            cur.execute(
-                '''
-                SELECT data
-                FROM indent_stock
-                WHERE key = %s
-                ''',
-                (stock_key,)
-            )
-
-            row = cur.fetchone()
-
-            if row:
-
-                stock_data = parse_json_data(
-                    row[0]
-                )
-
-                existingindentQty = stock_data[
-                    "indentQuantity"
-                ]
-
-                stock_data[
-                    "indentQuantity"
-                ] = (
-                    existingindentQty
-                    +
-                    indentquantity
-                )
-
-                cur.execute(
-                    '''
-                    UPDATE indent_stock
-                    SET data = %s
-                    WHERE key = %s
-                    ''',
-                    (
-                        jsonb(stock_data),
-                        stock_key
-                    )
-                )
-
-            else:
-
-                stock_data = {
-                    "indentQuantity":
-                        indentquantity
-                }
-
-                cur.execute(
-                    '''
-                    INSERT INTO indent_stock
-                        (key, data)
-                    VALUES
-                        (%s, %s)
-                    ''',
-                    (
-                        stock_key,
-                        jsonb(stock_data)
-                    )
-                )
-
-            # ------------------------------------------------
-            # Save job indent
-            # ------------------------------------------------
-
-            cur.execute(
-                '''
-                INSERT INTO job_indents
-                    (jobid, data)
-                VALUES
-                    (%s, %s)
-                ''',
-                (
-                    jobid,
-                    jsonb(indent)
-                )
-            )
-
-        conn.commit()
-
-        cur.close()
-        conn.close()
-
-        return jsonify({
-            'message': 'Job indents submitted'
-        }), 200
-
+        with conn:
+            submit_indents(conn, data)
+        return jsonify({'message': 'Job indents submitted'}), 200
+    except IndentSubmissionError as error:
+        return jsonify({'error': str(error)}), error.status_code
     except Exception as e:
-
-        print(
-            "Exception: %s",
-            str(e)
-        )
-
-        return jsonify({
-            'error': str(e)
-        }), 500
+        app.logger.exception('Could not submit job indents')
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 @app.route('/job_indents/<jobid>', methods=['GET'])

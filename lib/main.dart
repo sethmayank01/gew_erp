@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'routes.dart';
-import 'screens/login_screen.dart';
-import 'package:flutter/foundation.dart';
+import 'widgets/mandatory_update_gate.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -39,6 +38,8 @@ class MyApp extends StatelessWidget {
         ),
       ),
       routerConfig: router,
+      builder: (context, child) =>
+          MandatoryUpdateGate(child: child ?? const SizedBox.shrink()),
     );
   }
 

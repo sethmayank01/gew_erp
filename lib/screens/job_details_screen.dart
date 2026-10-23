@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import 'package:go_router/go_router.dart';
 import 'job_list_screen.dart';
+import '../models/transformer_vector_group.dart';
 
 class JobDetailsScreen extends StatefulWidget {
   const JobDetailsScreen({super.key});
@@ -21,13 +22,14 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
   final _phasesController = TextEditingController();
   final _hvVoltageController = TextEditingController();
   final _lvVoltageController = TextEditingController();
+  final _lv2VoltageController = TextEditingController();
+  final _vectorGroupController = TextEditingController();
   final _tapMaxController = TextEditingController();
   final _tapMinController = TextEditingController();
   final _stepVoltageController = TextEditingController();
   final _remarkController = TextEditingController();
   final _quantityController = TextEditingController();
 
-  String? _selectedVectorGroup;
   String? _selectedRelevantIS;
   String? _selectedTappingType;
   String? _selectedJobType;
@@ -37,10 +39,7 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
   bool _showTapping = true;
 
   final List<String> _vectorGroupOptions = [
-    'Dyn11',
-    'YNd11',
-    'Dd0',
-    'YNd1',
+    ...TransformerVectorGroup.supportedNames,
     'Not Applicable',
   ];
   final List<String> _relevantISOptions = ['IS:2026', 'IS:1180'];
@@ -54,8 +53,44 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
     _loadUserRole();
   }
 
+  TransformerVectorGroup? get _vectorConfig {
+    final name = _vectorGroupController.text.trim();
+    if (name.isEmpty || name.toLowerCase() == 'not applicable') return null;
+    try {
+      return TransformerVectorGroup.fromName(name);
+    } on FormatException {
+      return null;
+    }
+  }
+
+  bool get _hasDualOutput => _vectorConfig?.hasDualOutput ?? false;
+
+  @override
+  void dispose() {
+    for (final controller in [
+      _purchaserNameController,
+      _purchaserRefController,
+      _serialNoController,
+      _kvaController,
+      _phasesController,
+      _hvVoltageController,
+      _lvVoltageController,
+      _lv2VoltageController,
+      _vectorGroupController,
+      _tapMaxController,
+      _tapMinController,
+      _stepVoltageController,
+      _remarkController,
+      _quantityController,
+    ]) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
   Future<void> _loadUserRole() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     setState(() {
       _userRole = prefs.getString('role') ?? 'user';
     });
@@ -91,7 +126,7 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
       'serialNo': _serialNoController.text,
       'kva': _kvaController.text,
       'phases': _phasesController.text,
-      'vectorGroup': _selectedVectorGroup,
+      'vectorGroup': _vectorGroupController.text.trim(),
       'relevantIS': _selectedRelevantIS,
       'tappingType': _selectedTappingType,
       'tappingRangeMax': _showTapping ? _tapMaxController.text : null,
@@ -99,6 +134,7 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
       'stepVoltage': _showTapping ? _stepVoltageController.text : null,
       'hvVoltage': _hvVoltageController.text,
       'lvVoltage': _lvVoltageController.text,
+      if (_hasDualOutput) 'lv2Voltage': _lv2VoltageController.text,
       'jobType': _selectedJobType,
       'material': _selectedMaterial ?? 'Copper',
       'remark': _remarkController.text,
@@ -119,7 +155,11 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
     );
   }
 
-  Widget _buildField(TextEditingController controller, String label) {
+  Widget _buildField(
+    TextEditingController controller,
+    String label, {
+    bool voltage = false,
+  }) {
     return SizedBox(
       width: MediaQuery.of(context).size.width / 2 - 24,
       child: TextFormField(
@@ -133,8 +173,56 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
             vertical: 10,
           ),
         ),
-        validator: (value) =>
-            value == null || value.isEmpty ? 'Required' : null,
+        validator: (value) {
+          if (value == null || value.trim().isEmpty) return 'Required';
+          if (voltage) {
+            final number = double.tryParse(value);
+            if (number == null || !number.isFinite || number <= 0) {
+              return 'Enter a positive voltage';
+            }
+          }
+          return null;
+        },
+      ),
+    );
+  }
+
+  Widget _buildVectorGroupField() {
+    return SizedBox(
+      width: MediaQuery.of(context).size.width / 2 - 24,
+      child: TextFormField(
+        controller: _vectorGroupController,
+        onChanged: (_) => setState(() {}),
+        decoration: InputDecoration(
+          labelText: 'Vector Group',
+          isDense: true,
+          border: const OutlineInputBorder(),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 10,
+          ),
+          suffixIcon: PopupMenuButton<String>(
+            tooltip: 'Vector groups',
+            icon: const Icon(Icons.arrow_drop_down),
+            itemBuilder: (context) => _vectorGroupOptions
+                .map((name) => PopupMenuItem(value: name, child: Text(name)))
+                .toList(),
+            onSelected: (value) {
+              _vectorGroupController.text = value;
+              setState(() {});
+            },
+          ),
+        ),
+        validator: (value) {
+          if (value == null || value.trim().isEmpty) return 'Required';
+          if (value.trim().toLowerCase() == 'not applicable') return null;
+          try {
+            TransformerVectorGroup.fromName(value);
+            return null;
+          } on FormatException catch (error) {
+            return error.message;
+          }
+        },
       ),
     );
   }
@@ -215,20 +303,29 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
                 _buildField(_purchaserRefController, 'Purchaser Reference'),
                 _buildField(_kvaController, 'KVA'),
                 _buildField(_phasesController, 'Phases'),
-                _buildDropdownField(
-                  'Vector Group',
-                  _vectorGroupOptions,
-                  _selectedVectorGroup,
-                  (val) => setState(() => _selectedVectorGroup = val),
-                ),
+                _buildVectorGroupField(),
                 _buildDropdownField(
                   'Relevant IS',
                   _relevantISOptions,
                   _selectedRelevantIS,
                   (val) => setState(() => _selectedRelevantIS = val),
                 ),
-                _buildField(_hvVoltageController, 'HV Voltage'),
-                _buildField(_lvVoltageController, 'LV Voltage'),
+                _buildField(
+                  _hvVoltageController,
+                  'HV Voltage',
+                  voltage: _vectorConfig != null,
+                ),
+                _buildField(
+                  _lvVoltageController,
+                  _hasDualOutput ? 'LV1 Voltage' : 'LV Voltage',
+                  voltage: _vectorConfig != null,
+                ),
+                if (_hasDualOutput)
+                  _buildField(
+                    _lv2VoltageController,
+                    'LV2 Voltage',
+                    voltage: true,
+                  ),
                 _buildDropdownField(
                   'Tapping Type',
                   _tappingTypeOptions,

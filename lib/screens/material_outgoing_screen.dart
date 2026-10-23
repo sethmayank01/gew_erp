@@ -29,6 +29,8 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
   final TextEditingController _issueQtyController = TextEditingController();
 
   bool _isLoading = true;
+  bool _isSubmitting = false;
+  Map<String, dynamic>? _pendingOutgoingData;
 
   // FIFO Stock entries for selected material
   List<Map<String, dynamic>> _matchingStockEntries = [];
@@ -171,6 +173,11 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
   }
 
   Future<void> _submitIssue() async {
+    if (_isSubmitting) return;
+    if (_pendingOutgoingData != null) {
+      await _savePendingIssue();
+      return;
+    }
     final issueQty = double.tryParse(_issueQtyController.text) ?? 0.0;
     if (_selectedJob == null || _selectedMaterial == null || issueQty <= 0)
       return;
@@ -209,6 +216,7 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
       double available = (double.tryParse(entry['quantity'].toString()) ?? 0.0);
       double price = (double.tryParse(entry['price'].toString()) ?? 0.0);
       double takeQty = min(qtyRequired, available);
+      if (takeQty <= 0) continue;
 
       consumedStocks.add({
         ...entry,
@@ -219,40 +227,15 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
       weightedPriceSum += takeQty * price;
       totalIssued += takeQty;
       qtyRequired -= takeQty;
-
-      final updateResult = await ApiService.updateStockQuantity(
-        data: entry,
-        quantity: takeQty,
-        price: 0.0,
-        editFlag: false,
-      );
-      if (updateResult != true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Stock update failed: $updateResult')),
-        );
-        return; // Exit early on error
-      }
     }
+
+    if (qtyRequired > 0) return;
 
     double weightedAvgPrice = totalIssued > 0
         ? weightedPriceSum / totalIssued
         : 0;
 
     final material = _selectedMaterial!;
-    final data = {
-      'serialNo': _selectedJob!['serialNo'],
-      'material': material['type'] + ' - ' + material['subtype'],
-      'type': material['type'],
-      'subtype': material['subtype'],
-      'price': weightedPriceSum / totalIssued,
-      'issuedQty': totalIssued,
-      'issuedValue': weightedPriceSum,
-      'user_out': _username,
-      'out_time': DateTime.now().toString(),
-      'jobSpecific': material['jobSpecific'],
-    };
-
-    await ApiService.updateJobIndent(data: data);
     final uuid = Uuid().v4();
 
     final outgoingData = {
@@ -270,18 +253,30 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
       'jobSpecific': material['jobSpecific'],
     };
 
-    final result = await ApiService.saveOutgoingMaterial(outgoingData);
-    if (result == true) {
+    _pendingOutgoingData = outgoingData;
+    await _savePendingIssue();
+  }
+
+  Future<void> _savePendingIssue() async {
+    setState(() => _isSubmitting = true);
+    try {
+      await ApiService.saveOutgoingMaterial(_pendingOutgoingData!);
+      _pendingOutgoingData = null;
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Material issued successfully!')),
       );
       _issueQtyController.clear();
-      await _onMaterialSelected(material);
+      await _onMaterialSelected(_selectedMaterial);
       await _loadOutgoingList(search: _searchQuery);
-    } else {
+    } catch (error) {
+      if (error is OutgoingIssueRejected) _pendingOutgoingData = null;
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Error: $result')));
+      ).showSnackBar(SnackBar(content: Text('Error: $error')));
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
@@ -396,6 +391,7 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       DropdownSearch<Map<String, dynamic>>(
+                        enabled: !_isSubmitting && _pendingOutgoingData == null,
                         items: _jobs,
 
                         selectedItem: _selectedJob,
@@ -453,6 +449,7 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                       const SizedBox(height: 16),
                       // Updated Material Dropdown with search and alphabetic sort
                       DropdownSearch<String>(
+                        enabled: !_isSubmitting && _pendingOutgoingData == null,
                         items: materialStringList,
                         selectedItem: _selectedMaterial != null
                             ? '${_selectedMaterial!['type'] ?? ''} - ${_selectedMaterial!['subtype'] ?? ''}'
@@ -494,6 +491,7 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                       const SizedBox(height: 16),
                       TextFormField(
                         controller: _issueQtyController,
+                        enabled: !_isSubmitting && _pendingOutgoingData == null,
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
                         ),
@@ -554,11 +552,14 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                         ),
                       const SizedBox(height: 16),
                       ElevatedButton(
-                        onPressed: () {
-                          if (_formKey.currentState!.validate()) {
-                            _submitIssue();
-                          }
-                        },
+                        onPressed: _isSubmitting
+                            ? null
+                            : () {
+                                if (_pendingOutgoingData != null ||
+                                    _formKey.currentState!.validate()) {
+                                  _submitIssue();
+                                }
+                              },
                         child: const Text('Submit Issue'),
                       ),
                       _buildOutgoingTable(),

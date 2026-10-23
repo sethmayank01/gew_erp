@@ -2,10 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'saved_reports_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../services/api_service.dart';
-import 'dart:io' show Platform;
-import 'package:url_launcher/url_launcher.dart';
-import 'dart:async';
 import 'package:package_info_plus/package_info_plus.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -18,8 +14,6 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   String _role = '';
   String _username = '';
-  Timer? _updateTimer;
-  int timerDuration = 300;
   String _appVersion = '';
 
   @override
@@ -27,12 +21,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.initState();
     _loadUser();
     _loadAppVersion();
-    checkForUpdatesIfNeeded();
-
-    // Then check every hour
-    _updateTimer = Timer.periodic(Duration(seconds: timerDuration), (timer) {
-      checkForUpdatesIfNeeded();
-    });
   }
 
   Future<void> _loadAppVersion() async {
@@ -51,84 +39,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _role = prefs.getString('role')?.toLowerCase() ?? 'user';
       _username = prefs.getString('username') ?? '';
     });
-  }
-
-  Future<void> checkForUpdatesIfNeeded() async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
-    final int now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final versionInfo = await ApiService.fetchVersionInfo();
-    if (versionInfo == null) return;
-
-    timerDuration = versionInfo['interval_seconds'];
-
-    await prefs.setInt('last_update_check', now);
-
-    final String platform = Platform.isAndroid ? 'android' : 'windows';
-    final String latestVersion = versionInfo[platform]['version'];
-    final String currentVersion = await ApiService.getCurrentAppVersion();
-
-    if (currentVersion != latestVersion) {
-      showUpdateDialog(
-        context,
-        downloadUrl:
-            versionInfo[platform]['apk_url'] ??
-            versionInfo[platform]['installer_url'],
-        changelog: versionInfo['changelog'] ?? '',
-        latestVersion: latestVersion,
-      );
-    }
-  }
-
-  void showUpdateDialog(
-    BuildContext context, {
-    required String downloadUrl,
-    required String changelog,
-    required String latestVersion,
-  }) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Update Available!"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text("A new version ($latestVersion) is available."),
-            if (changelog.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              const Text("What's new:"),
-              Text(changelog),
-            ],
-          ],
-        ),
-        actions: [
-          ElevatedButton(
-            child: const Text("Update"),
-            onPressed: () async {
-              // Launch the update link
-              await launchUrl(
-                Uri.parse(downloadUrl),
-                mode: LaunchMode.externalApplication,
-              );
-              // Pop the dialog
-              Navigator.pop(context);
-              // Logout: clear prefs and go to login page
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.clear();
-              if (context.mounted) {
-                context.go('/'); // Or your login route
-              }
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  void dispose() {
-    _updateTimer?.cancel(); // This disposes the timer!
-    super.dispose();
   }
 
   @override
