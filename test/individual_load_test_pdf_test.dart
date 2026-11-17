@@ -36,6 +36,61 @@ class _OfflineFontCache extends PdfBaseCache {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'long dual-output ratio tables paginate in final and draft reports',
+    () async {
+      final previousCache = PdfBaseCache.defaultCache;
+      PdfBaseCache.defaultCache = _OfflineFontCache();
+      addTearDown(() => PdfBaseCache.defaultCache = previousCache);
+      final data = individualReport()
+        ..addAll({
+          'serialNo': '17-TAP-QA',
+          'dateOfTesting': '16-11-2026',
+          'purchaserName': 'Pagination test',
+          'phases': '3',
+          'vectorGroup': 'Dyn11yn11',
+          'tappingRangeMin': -10,
+          'tappingRangeMax': 10,
+          'stepVoltage': 1.25,
+        });
+      data['testData']['includeIndividualLoadTests'] = false;
+      data['testData']['insulationResistance'] = {
+        'hv-e': '100',
+        'lv-e': '100',
+        'hv-lv': '100',
+      };
+      data['testData']['noLoadTest'] = {
+        for (final phase in ['U', 'V', 'W'])
+          phase: {'amp': '1', 'volt': '710', 'watt': '100'},
+      };
+      for (final key in ['ratios', 'ratiosLv2']) {
+        data['testData'][key] = List.generate(
+          17,
+          (_) => {'U': '46.48', 'V': '46.48', 'W': '46.48'},
+        );
+      }
+      const savedPath = String.fromEnvironment('REPORT_QA_INPUT');
+      final input = savedPath.isEmpty
+          ? data
+          : jsonDecode(await File(savedPath).readAsString())
+                as Map<String, dynamic>;
+      for (final draft in [false, true]) {
+        final bytes = await TestReportPdfGenerator.generatePDF(input, draft);
+        final document = latin1.decode(bytes);
+        expect(document, startsWith('%PDF'));
+        expect(
+          RegExp(r'/Type\s*/Page\b').allMatches(document).length,
+          greaterThan(1),
+        );
+        if (savedPath.isNotEmpty) {
+          await Directory('tmp/pdfs').create(recursive: true);
+          await File(
+            'tmp/pdfs/trfd0721-${draft ? 'draft' : 'final'}-qa.pdf',
+          ).writeAsBytes(bytes);
+        }
+      }
+    },
+  );
   testWidgets('preview reuses bytes and refreshes when report mode changes', (
     tester,
   ) async {

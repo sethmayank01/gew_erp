@@ -38,6 +38,8 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
   String _role = '';
   String _username = '';
   String _searchQuery = '';
+  bool _isSubmitting = false;
+  Map<String, dynamic>? _pendingIncoming;
 
   @override
   void initState() {
@@ -66,6 +68,7 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
 
   Future<void> _loadUser() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     setState(() {
       _role = prefs.getString('role')?.toLowerCase() ?? 'user';
       _username = prefs.getString('username') ?? '';
@@ -75,6 +78,7 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
   Future<void> _loadData() async {
     final materials = await ApiService.getMaterials();
     final jobs = await ApiService.getOpenJobs();
+    if (!mounted) return;
     setState(() {
       _materialsRaw = List<Map<String, dynamic>>.from(materials);
       _materials =
@@ -98,11 +102,20 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
     List<Map<String, dynamic>> entries = List<Map<String, dynamic>>.from(data);
 
     entries.sort((a, b) {
-      final dateA = DateTime.tryParse(a['entryDate'] ?? '') ?? DateTime(2000);
-      final dateB = DateTime.tryParse(b['entryDate'] ?? '') ?? DateTime(2000);
-      return dateB.compareTo(dateA); // Newest first
+      final approvedA = a['approved'] == true;
+      final approvedB = b['approved'] == true;
+      if (approvedA != approvedB) return approvedA ? 1 : -1;
+
+      final dateA = DateTime.tryParse(a['entryDate']?.toString() ?? '');
+      final dateB = DateTime.tryParse(b['entryDate']?.toString() ?? '');
+      if (dateA == null && dateB != null) return 1;
+      if (dateA != null && dateB == null) return -1;
+      final byDate = dateA == null ? 0 : dateB!.compareTo(dateA);
+      if (byDate != 0) return byDate;
+      return (a['id']?.toString() ?? '').compareTo(b['id']?.toString() ?? '');
     });
 
+    if (!mounted) return;
     setState(() => _entries = entries);
   }
 
@@ -157,9 +170,10 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
   }
 
   Future<void> _submit() async {
+    if (_isSubmitting) return;
     if (!_formKey.currentState!.validate()) return;
-
-    final data = {
+    setState(() => _isSubmitting = true);
+    final data = _pendingIncoming ??= {
       'material': _selectedMaterial,
       'type': _type,
       'subtype': _subtype,
@@ -174,31 +188,50 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
       'user': _username,
     };
 
-    await ApiService.submitMaterialIncoming(data);
-    await _loadEntries();
-
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text("Material entry submitted")));
-
-    _formKey.currentState!.reset();
-    setState(() {
-      _selectedMaterial = null;
-      _selectedJob = null;
-    });
+    try {
+      await ApiService.submitMaterialIncoming(data);
+      _pendingIncoming = null;
+      if (!mounted) return;
+      _formKey.currentState!.reset();
+      for (final controller in [
+        _qtyController,
+        _priceController,
+        _makeController,
+        _descController,
+        _invoiceController,
+      ]) {
+        controller.clear();
+      }
+      setState(() {
+        _selectedMaterial = null;
+        _selectedJob = null;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Material entry submitted')));
+      await _loadEntries();
+    } catch (error) {
+      if (error is ApiException && error.statusCode < 500)
+        _pendingIncoming = null;
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Submission failed: $error')));
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
   }
 
   Future<void> _deleteEntry(String id, String user) async {
     if (_role == "admin" || user == _username) {
       try {
-        final entry = await ApiService.getMaterialEntryById(id);
-        if (entry != null) {
-          await ApiService.removeStock(data: entry);
-          await ApiService.deleteMaterialEntry(id);
-          await _loadEntries();
-        }
+        await ApiService.deleteMaterialEntry(id);
+        await _loadEntries();
       } catch (e) {
-        print('Error deleting entry: $e');
+        if (mounted)
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Could not delete entry: $e')));
       }
     }
   }
@@ -401,6 +434,7 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                         Expanded(
                           child: DropdownSearch<String>(
                             selectedItem: _selectedMaterial,
+                            enabled: !_isSubmitting && _pendingIncoming == null,
                             items: _materials,
                             filterFn: (item, filter) {
                               if (item == null || filter == null) return false;
@@ -438,6 +472,8 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                           Expanded(
                             child: DropdownSearch<String>(
                               selectedItem: _selectedJob,
+                              enabled:
+                                  !_isSubmitting && _pendingIncoming == null,
                               items: List<String>.from(_jobNumbers),
                               dropdownDecoratorProps:
                                   const DropDownDecoratorProps(
@@ -469,6 +505,7 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                         Expanded(
                           child: TextFormField(
                             controller: _qtyController,
+                            enabled: !_isSubmitting && _pendingIncoming == null,
                             keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
                             ),
@@ -479,7 +516,10 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                             validator: (val) {
                               if (val == null || val.isEmpty) return 'Required';
                               final parsed = double.tryParse(val);
-                              if (parsed == null) return 'Enter valid number';
+                              if (parsed == null ||
+                                  !parsed.isFinite ||
+                                  parsed <= 0)
+                                return 'Enter a positive number';
                               return null;
                             },
                           ),
@@ -488,6 +528,7 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                         Expanded(
                           child: TextFormField(
                             controller: _priceController,
+                            enabled: !_isSubmitting && _pendingIncoming == null,
                             keyboardType: const TextInputType.numberWithOptions(
                               decimal: true,
                             ),
@@ -498,7 +539,10 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                             validator: (val) {
                               if (val == null || val.isEmpty) return 'Required';
                               final parsed = double.tryParse(val);
-                              if (parsed == null) return 'Enter valid number';
+                              if (parsed == null ||
+                                  !parsed.isFinite ||
+                                  parsed < 0)
+                                return 'Enter a nonnegative number';
                               return null;
                             },
                           ),
@@ -511,6 +555,7 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                         Expanded(
                           child: TextFormField(
                             controller: _makeController,
+                            enabled: !_isSubmitting && _pendingIncoming == null,
                             decoration: const InputDecoration(
                               labelText: 'Make',
                               border: OutlineInputBorder(),
@@ -525,6 +570,7 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                         Expanded(
                           child: TextFormField(
                             controller: _descController,
+                            enabled: !_isSubmitting && _pendingIncoming == null,
                             decoration: const InputDecoration(
                               labelText: 'Description',
                               border: OutlineInputBorder(),
@@ -536,6 +582,7 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                     const SizedBox(height: 8),
                     TextFormField(
                       controller: _invoiceController,
+                      enabled: !_isSubmitting && _pendingIncoming == null,
                       decoration: const InputDecoration(
                         labelText: 'Invoice Number',
                         border: OutlineInputBorder(),
@@ -545,7 +592,7 @@ class _MaterialIncomingScreenState extends State<MaterialIncomingScreen> {
                     ),
                     const SizedBox(height: 12),
                     ElevatedButton(
-                      onPressed: _submit,
+                      onPressed: _isSubmitting ? null : _submit,
                       child: const Text('Submit'),
                     ),
                   ],

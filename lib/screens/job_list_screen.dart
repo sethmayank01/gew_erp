@@ -15,6 +15,7 @@ class _JobListScreenState extends State<JobListScreen> {
   List<Map<String, dynamic>> _jobs = [];
   String _filter = 'All';
   String _userRole = '';
+  final Set<String> _updatingJobs = {};
 
   final List<String> _filterOptions = [
     'All',
@@ -50,6 +51,7 @@ class _JobListScreenState extends State<JobListScreen> {
 
   Future<void> _loadUserRole() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     setState(() {
       _userRole = prefs.getString('role') ?? 'user';
     });
@@ -57,6 +59,7 @@ class _JobListScreenState extends State<JobListScreen> {
 
   Future<void> _loadJobs() async {
     final jobs = await ApiService.getJobs();
+    if (!mounted) return;
     // Sort jobs in descending order by serialNo (assuming serialNo is numeric or sortable correctly as string)
     List<Map<String, dynamic>> sortedJobs = List<Map<String, dynamic>>.from(
       jobs,
@@ -80,8 +83,24 @@ class _JobListScreenState extends State<JobListScreen> {
   }
 
   Future<void> _updateJob(Map<String, dynamic> job) async {
-    await ApiService.updateJob(job);
-    await _loadJobs();
+    final serial = job['serialNo'].toString();
+    if (!_updatingJobs.add(serial)) return;
+    try {
+      await ApiService.updateJob(job);
+      await _loadJobs();
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Could not update job: $error')));
+      if (mounted) {
+        try {
+          await _loadJobs();
+        } catch (_) {}
+      }
+    } finally {
+      _updatingJobs.remove(serial);
+    }
   }
 
   // Filter + Search together
@@ -138,6 +157,7 @@ class _JobListScreenState extends State<JobListScreen> {
   }
 
   Future<void> _selectDispatchDate(Map<String, dynamic> job) async {
+    if (_updatingJobs.contains(job['serialNo'].toString())) return;
     final picked = await showDatePicker(
       context: context,
       initialDate: DateTime.now(),
@@ -153,6 +173,7 @@ class _JobListScreenState extends State<JobListScreen> {
   }
 
   Future<void> _toggleFinal(Map<String, dynamic> job, bool? newVal) async {
+    if (_updatingJobs.contains(job['serialNo'].toString())) return;
     setState(() {
       job['isFinal'] = newVal ?? false;
     });

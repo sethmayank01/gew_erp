@@ -29,6 +29,11 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
   final TextEditingController _issueQtyController = TextEditingController();
 
   bool _isLoading = true;
+  String? _initialError;
+  bool _isLoadingSelection = false;
+  bool _selectionReady = false;
+  String? _selectionError;
+  int _selectionRequest = 0;
   bool _isSubmitting = false;
   Map<String, dynamic>? _pendingOutgoingData;
 
@@ -38,6 +43,8 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
   // Outgoing materials table data
   List<Map<String, dynamic>> _outgoingList = [];
   bool _isLoadingOutgoing = false;
+  int _outgoingRequest = 0;
+  String? _outgoingError;
 
   // Search feature
   final TextEditingController _searchController = TextEditingController();
@@ -54,6 +61,13 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
       final search = _searchController.text.trim();
 
       _outgoingSearchTimer?.cancel();
+      _outgoingRequest++;
+      setState(() {
+        _searchQuery = search;
+        _outgoingList = [];
+        _outgoingError = null;
+        _isLoadingOutgoing = true;
+      });
 
       _outgoingSearchTimer = Timer(const Duration(milliseconds: 400), () {
         _loadOutgoingList(search: search);
@@ -71,6 +85,7 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
 
   Future<void> _loadUser() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     setState(() {
       _role = prefs.getString('role')?.toLowerCase() ?? 'user';
       _username = prefs.getString('username') ?? '';
@@ -78,25 +93,43 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
   }
 
   Future<void> _loadInitialData() async {
-    final jobs = await ApiService.getJobs();
-    final materials = await ApiService.getMaterials();
-    // Sort materials alphabetically by type-subtype
-    materials.sort((a, b) {
-      final aKey = (a['type'] ?? '') + '-' + (a['subtype'] ?? '');
-      final bKey = (b['type'] ?? '') + '-' + (b['subtype'] ?? '');
-      return aKey.toLowerCase().compareTo(bKey.toLowerCase());
-    });
     setState(() {
-      _jobs = List<Map<String, dynamic>>.from(
-        jobs.where((job) => job['isFinal'] != true),
-      );
-      _materials = List<Map<String, dynamic>>.from(materials);
-      _isLoading = false;
+      _isLoading = true;
+      _initialError = null;
     });
+    try {
+      final jobs = await ApiService.getJobs();
+      final materials = await ApiService.getMaterials();
+      // Sort materials alphabetically by type-subtype
+      materials.sort((a, b) {
+        final aKey = (a['type'] ?? '') + '-' + (a['subtype'] ?? '');
+        final bKey = (b['type'] ?? '') + '-' + (b['subtype'] ?? '');
+        return aKey.toLowerCase().compareTo(bKey.toLowerCase());
+      });
+      if (!mounted) return;
+      setState(() {
+        _jobs = List<Map<String, dynamic>>.from(
+          jobs.where((job) => job['isFinal'] != true),
+        );
+        _materials = List<Map<String, dynamic>>.from(materials);
+        _isLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _initialError = 'Could not load jobs and materials: $error';
+      });
+    }
   }
 
   Future<void> _loadOutgoingList({String search = ''}) async {
     if (!mounted) return;
+    final request = ++_outgoingRequest;
+    setState(() {
+      _isLoadingOutgoing = true;
+      _outgoingError = null;
+    });
 
     try {
       final outgoing = await ApiService.getOutgoingMaterials(search: search);
@@ -104,72 +137,128 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
       // Backend already returns newest first using the indexed out_time.
       final outgoingList = List<Map<String, dynamic>>.from(outgoing);
 
-      if (!mounted) return;
+      if (!mounted || request != _outgoingRequest) return;
 
       setState(() {
         _outgoingList = outgoingList;
         _isLoadingOutgoing = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || request != _outgoingRequest) return;
 
       setState(() {
         _outgoingList = [];
         _isLoadingOutgoing = false;
+        _outgoingError = 'Could not load outgoing entries: $e';
       });
     }
   }
 
   Future<void> _onMaterialSelected(Map<String, dynamic>? material) async {
-    if (material == null || _selectedJob == null) return;
+    final request = ++_selectionRequest;
+    final serialNo = _selectedJob?['serialNo'];
     setState(() {
       _selectedMaterial = material;
+      _selectionReady = false;
+      _selectionError = null;
+      _matchingStockEntries = [];
+      _availableQty = 0;
+      _indentQty = 0;
+      _selectedIndent = null;
+      _issueQtyController.clear();
+      _isLoadingSelection = material != null && serialNo != null;
     });
+    if (material == null || serialNo == null) return;
 
-    final stock = await ApiService.getStock(material['jobSpecific']);
-    List<Map<String, dynamic>> matching = stock
-        .where(
-          (s) =>
-              s['type'] == material['type'] &&
-              s['subtype'] == material['subtype'] &&
-              (material['jobSpecific'] != true ||
-                  s['serialNo'] == _selectedJob!['serialNo']),
-        )
-        .toList()
-        .cast<Map<String, dynamic>>();
+    try {
+      final stock = await ApiService.getStock(material['jobSpecific']);
+      if (!mounted || request != _selectionRequest) return;
+      List<Map<String, dynamic>> matching = stock
+          .where(
+            (s) =>
+                s['type'] == material['type'] &&
+                s['subtype'] == material['subtype'] &&
+                (material['jobSpecific'] != true || s['serialNo'] == serialNo),
+          )
+          .toList()
+          .cast<Map<String, dynamic>>();
 
-    matching.sort((a, b) {
-      if (a['entryDate'] != null && b['entryDate'] != null) {
-        return DateTime.parse(
-          b['entryDate'],
-        ).compareTo(DateTime.parse(a['entryDate'])); // Newest to oldest
-      }
-      return 0;
-    });
+      matching.sort((a, b) {
+        final dateA = _receiptDate(a);
+        final dateB = _receiptDate(b);
+        final order = dateA == null
+            ? (dateB == null ? 0 : 1)
+            : (dateB == null ? -1 : dateA.compareTo(dateB));
+        return order != 0
+            ? order
+            : a['id'].toString().compareTo(b['id'].toString());
+      });
 
-    final totalAvailable = matching.fold<double>(
-      0.0,
-      (sum, e) => sum + (double.tryParse(e['quantity'].toString()) ?? 0.0),
-    );
+      final totalAvailable = matching.fold<double>(
+        0.0,
+        (sum, e) => sum + (double.tryParse(e['quantity'].toString()) ?? 0.0),
+      );
 
-    final indentData = await ApiService.getIndentsForJob(
-      _selectedJob!['serialNo'],
-    );
-    final matchedIndent = indentData.firstWhere(
-      (i) =>
-          i['type'] == material['type'] &&
-          i['subtype'] == material['subtype'] &&
-          (material['jobSpecific'] != true ||
-              i['serialNo'] == _selectedJob!['serialNo']),
-      orElse: () => {'quantity': 0.0},
-    );
+      final indentData = await ApiService.getIndentsForJob(serialNo);
+      if (!mounted || request != _selectionRequest) return;
+      final matchedIndent = indentData.firstWhere(
+        (i) =>
+            i['type'] == material['type'] &&
+            i['subtype'] == material['subtype'] &&
+            (material['jobSpecific'] != true || i['serialNo'] == serialNo),
+        orElse: () => {'quantity': 0.0},
+      );
 
-    setState(() {
-      _matchingStockEntries = matching;
-      _availableQty = totalAvailable;
-      _indentQty = (matchedIndent['quantity'] ?? 0).toDouble();
-      _selectedIndent = matchedIndent;
-    });
+      setState(() {
+        _matchingStockEntries = matching;
+        _availableQty = totalAvailable;
+        _indentQty = (matchedIndent['quantity'] ?? 0).toDouble();
+        _selectedIndent = matchedIndent;
+        _isLoadingSelection = false;
+        _selectionReady = true;
+      });
+    } catch (error) {
+      if (!mounted || request != _selectionRequest) return;
+      setState(() {
+        _isLoadingSelection = false;
+        _selectionError = 'Could not load stock and indent: $error';
+      });
+    }
+  }
+
+  DateTime? _receiptDate(Map<String, dynamic> lot) {
+    final date = DateTime.tryParse(lot['entryDate']?.toString().trim() ?? '');
+    if (date == null || date.isUtc) return date;
+    // Older receipts store local Indian time without an offset.
+    return DateTime.utc(
+      date.year,
+      date.month,
+      date.day,
+      date.hour,
+      date.minute,
+      date.second,
+      date.millisecond,
+      date.microsecond,
+    ).subtract(const Duration(hours: 5, minutes: 30));
+  }
+
+  List<Map<String, dynamic>> _allocateLots(double quantity) {
+    final lots = <Map<String, dynamic>>[];
+    if (!quantity.isFinite || quantity <= 0) return lots;
+    var remaining = quantity;
+    for (final entry in _matchingStockEntries) {
+      if (remaining <= 0) break;
+      final available = double.tryParse(entry['quantity'].toString()) ?? 0.0;
+      if (!available.isFinite || available <= 0) continue;
+      final take = min(remaining, available);
+      lots.add({
+        ...entry,
+        'consumedQty': take,
+        'consumedPrice': double.tryParse(entry['price'].toString()) ?? 0.0,
+      });
+      remaining -= take;
+    }
+    return lots;
   }
 
   Future<void> _submitIssue() async {
@@ -179,7 +268,11 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
       return;
     }
     final issueQty = double.tryParse(_issueQtyController.text) ?? 0.0;
-    if (_selectedJob == null || _selectedMaterial == null || issueQty <= 0)
+    if (!_selectionReady ||
+        _selectedJob == null ||
+        _selectedMaterial == null ||
+        !issueQty.isFinite ||
+        issueQty <= 0)
       return;
 
     // Calculate 2% tolerance for indent quantity
@@ -207,33 +300,14 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
       return;
     }
 
-    double qtyRequired = issueQty;
-    double totalIssued = 0;
-    double weightedPriceSum = 0;
-    List<Map<String, dynamic>> consumedStocks = [];
-    for (var entry in _matchingStockEntries) {
-      if (qtyRequired <= 0) break;
-      double available = (double.tryParse(entry['quantity'].toString()) ?? 0.0);
-      double price = (double.tryParse(entry['price'].toString()) ?? 0.0);
-      double takeQty = min(qtyRequired, available);
-      if (takeQty <= 0) continue;
-
-      consumedStocks.add({
-        ...entry,
-        'consumedQty': takeQty,
-        'consumedPrice': price,
-      });
-
-      weightedPriceSum += takeQty * price;
-      totalIssued += takeQty;
-      qtyRequired -= takeQty;
-    }
-
-    if (qtyRequired > 0) return;
-
-    double weightedAvgPrice = totalIssued > 0
-        ? weightedPriceSum / totalIssued
-        : 0;
+    final consumedStocks = _allocateLots(issueQty);
+    if (consumedStocks.isEmpty) return;
+    final issuedValue = consumedStocks.fold<double>(
+      0,
+      (sum, lot) =>
+          sum +
+          (lot['consumedQty'] as double) * (lot['consumedPrice'] as double),
+    );
 
     final material = _selectedMaterial!;
     final uuid = Uuid().v4();
@@ -244,9 +318,9 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
       'material': material['type'] + ' - ' + material['subtype'],
       'type': material['type'],
       'subtype': material['subtype'],
-      'issuedQty': totalIssued,
-      'weightedAvgPrice': weightedAvgPrice,
-      'issuedValue': totalIssued * weightedAvgPrice,
+      'issuedQty': issueQty,
+      'weightedAvgPrice': issuedValue / issueQty,
+      'issuedValue': issuedValue,
       'details': consumedStocks,
       'user_out': _username,
       'out_time': DateTime.now().toIso8601String(),
@@ -275,6 +349,9 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Error: $error')));
+      if (error is OutgoingIssueRejected) {
+        await _onMaterialSelected(_selectedMaterial);
+      }
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
@@ -291,10 +368,6 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
       'Issued On',
     ];
 
-    if (_isLoadingOutgoing) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
     final filteredOutgoingList = _outgoingList;
 
     return Padding(
@@ -306,6 +379,18 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
             "Outgoing Material Entries",
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
           ),
+          if (_isLoadingOutgoing) const LinearProgressIndicator(),
+          if (_outgoingError != null)
+            Row(
+              children: [
+                Expanded(child: Text(_outgoingError!)),
+                IconButton(
+                  tooltip: 'Retry outgoing entries',
+                  onPressed: () => _loadOutgoingList(search: _searchQuery),
+                  icon: const Icon(Icons.refresh),
+                ),
+              ],
+            ),
           const SizedBox(height: 12),
           Padding(
             padding: const EdgeInsets.only(bottom: 8.0),
@@ -318,7 +403,9 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
               ),
             ),
           ),
-          if (filteredOutgoingList.isEmpty)
+          if (!_isLoadingOutgoing &&
+              _outgoingError == null &&
+              filteredOutgoingList.isEmpty)
             const Padding(
               padding: EdgeInsets.only(top: 32),
               child: Text(
@@ -382,6 +469,20 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
       appBar: AppBar(title: const Text("Issue Material to Job")),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
+          : _initialError != null
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(_initialError!),
+                  IconButton(
+                    tooltip: 'Retry jobs and materials',
+                    onPressed: _loadInitialData,
+                    icon: const Icon(Icons.refresh),
+                  ),
+                ],
+              ),
+            )
           : SingleChildScrollView(
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -391,6 +492,7 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       DropdownSearch<Map<String, dynamic>>(
+                        key: const Key('outgoing-job'),
                         enabled: !_isSubmitting && _pendingOutgoingData == null,
                         items: _jobs,
 
@@ -437,9 +539,7 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                             _selectedJob = val;
                           });
 
-                          if (_selectedMaterial != null) {
-                            await _onMaterialSelected(_selectedMaterial);
-                          }
+                          await _onMaterialSelected(_selectedMaterial);
                         },
 
                         validator: (val) {
@@ -449,6 +549,7 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                       const SizedBox(height: 16),
                       // Updated Material Dropdown with search and alphabetic sort
                       DropdownSearch<String>(
+                        key: const Key('outgoing-material'),
                         enabled: !_isSubmitting && _pendingOutgoingData == null,
                         items: materialStringList,
                         selectedItem: _selectedMaterial != null
@@ -478,20 +579,35 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                                 val,
                             orElse: () => {},
                           );
-                          if (mat.isNotEmpty) {
-                            await _onMaterialSelected(mat);
-                          }
+                          await _onMaterialSelected(mat.isEmpty ? null : mat);
                         },
                       ),
                       const SizedBox(height: 16),
-                      Text('Available Qty (LIFO): $_availableQty'),
+                      if (_isLoadingSelection) const LinearProgressIndicator(),
+                      if (_selectionError != null)
+                        Row(
+                          children: [
+                            Expanded(child: Text(_selectionError!)),
+                            IconButton(
+                              tooltip: 'Retry stock and indent',
+                              onPressed: () =>
+                                  _onMaterialSelected(_selectedMaterial),
+                              icon: const Icon(Icons.refresh),
+                            ),
+                          ],
+                        ),
+                      Text('Available Qty (FIFO): $_availableQty'),
                       Text(
                         'Indent Qty: $_indentQty (Allowed upto ${indentQtyWithTolerance.toStringAsFixed(2)})',
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
                         controller: _issueQtyController,
-                        enabled: !_isSubmitting && _pendingOutgoingData == null,
+                        onChanged: (_) => setState(() {}),
+                        enabled:
+                            _selectionReady &&
+                            !_isSubmitting &&
+                            _pendingOutgoingData == null,
                         keyboardType: const TextInputType.numberWithOptions(
                           decimal: true,
                         ),
@@ -502,7 +618,8 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                         validator: (val) {
                           if (val == null || val.isEmpty) return 'Required';
                           final parsed = double.tryParse(val);
-                          if (parsed == null) return 'Enter valid number';
+                          if (parsed == null || !parsed.isFinite)
+                            return 'Enter valid number';
                           if (parsed <= 0) return 'Quantity must be > 0';
                           if (parsed > _availableQty)
                             return 'Cannot issue more than available stock ($_availableQty)';
@@ -521,23 +638,7 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                             final reqQty = double.tryParse(
                               _issueQtyController.text,
                             )!;
-                            double qtyLeft = reqQty;
-                            List<Widget> batches = [];
-                            for (var entry in _matchingStockEntries) {
-                              if (qtyLeft <= 0) break;
-                              final avail =
-                                  (double.tryParse(
-                                    entry['quantity'].toString(),
-                                  ) ??
-                                  0.0);
-                              final take = min(qtyLeft, avail);
-                              batches.add(
-                                Text(
-                                  'Take $take from batch @ ₹${entry['price']} (StockID: ${entry['id'] ?? entry['key']})',
-                                ),
-                              );
-                              qtyLeft -= take;
-                            }
+                            final batches = _allocateLots(reqQty);
                             return Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
@@ -545,14 +646,20 @@ class _OutgoingMaterialScreenState extends State<OutgoingMaterialScreen> {
                                   "FIFO Batches to be Consumed:",
                                   style: TextStyle(fontWeight: FontWeight.bold),
                                 ),
-                                ...batches,
+                                for (final lot in batches)
+                                  Text(
+                                    'Take ${lot['consumedQty']} from batch @ ₹${lot['price']} (StockID: ${lot['id']})',
+                                  ),
                               ],
                             );
                           },
                         ),
                       const SizedBox(height: 16),
                       ElevatedButton(
-                        onPressed: _isSubmitting
+                        onPressed:
+                            _isSubmitting ||
+                                (!_selectionReady &&
+                                    _pendingOutgoingData == null)
                             ? null
                             : () {
                                 if (_pendingOutgoingData != null ||

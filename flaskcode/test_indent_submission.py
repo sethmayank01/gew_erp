@@ -8,6 +8,7 @@ import psycopg2
 
 import app
 from indent_submission import IndentSubmissionError, submit_indents
+from test_support import authenticated_client
 
 
 class IndentSubmissionTests(unittest.TestCase):
@@ -124,7 +125,7 @@ class IndentSubmissionTests(unittest.TestCase):
                 pass
 
         with patch.object(app, 'get_db_connection', return_value=ConnectionProxy()):
-            client = app.app.test_client()
+            client = authenticated_client(app.app)
             self.assertEqual(client.post('/job_indents', json={'data': self.batch}).status_code, 200)
             retry = client.post('/job_indents', json={'data': self.batch})
             self.assertEqual(retry.status_code, 409)

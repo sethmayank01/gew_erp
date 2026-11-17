@@ -56,7 +56,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
             tooltip: 'Logout',
             onPressed: () async {
               final prefs = await SharedPreferences.getInstance();
-              await prefs.clear();
+              await prefs.remove('accessToken');
+              await prefs.remove('username');
+              await prefs.remove('role');
+              if (!context.mounted) return;
               context.go('/');
             },
           ),

@@ -37,6 +37,8 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
       'Copper'; // Default value (keep default for Material only)
   String _userRole = '';
   bool _showTapping = true;
+  bool _isSaving = false;
+  Map<String, dynamic>? _pendingJob;
 
   final List<String> _vectorGroupOptions = [
     ...TransformerVectorGroup.supportedNames,
@@ -115,44 +117,57 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
   }
 
   void _submitForm() async {
+    if (_isSaving) return;
     if (!_formKey.currentState!.validate()) return;
+    setState(() => _isSaving = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final username = prefs.getString('username') ?? 'unknown';
 
-    final prefs = await SharedPreferences.getInstance();
-    final username = prefs.getString('username') ?? 'unknown';
+      final data = _pendingJob ??= {
+        'purchaserName': _purchaserNameController.text,
+        'purchaserReference': _purchaserRefController.text,
+        'serialNo': _serialNoController.text,
+        'kva': _kvaController.text,
+        'phases': _phasesController.text,
+        'vectorGroup': _vectorGroupController.text.trim(),
+        'relevantIS': _selectedRelevantIS,
+        'tappingType': _selectedTappingType,
+        'tappingRangeMax': _showTapping ? _tapMaxController.text : null,
+        'tappingRangeMin': _showTapping ? _tapMinController.text : null,
+        'stepVoltage': _showTapping ? _stepVoltageController.text : null,
+        'hvVoltage': _hvVoltageController.text,
+        'lvVoltage': _lvVoltageController.text,
+        if (_hasDualOutput) 'lv2Voltage': _lv2VoltageController.text,
+        'jobType': _selectedJobType,
+        'material': _selectedMaterial ?? 'Copper',
+        'remark': _remarkController.text,
+        'quantity': _quantityController.text,
+        'entryDateTime': DateTime.now().toIso8601String(),
+        'createdBy': username,
+      };
 
-    final data = {
-      'purchaserName': _purchaserNameController.text,
-      'purchaserReference': _purchaserRefController.text,
-      'serialNo': _serialNoController.text,
-      'kva': _kvaController.text,
-      'phases': _phasesController.text,
-      'vectorGroup': _vectorGroupController.text.trim(),
-      'relevantIS': _selectedRelevantIS,
-      'tappingType': _selectedTappingType,
-      'tappingRangeMax': _showTapping ? _tapMaxController.text : null,
-      'tappingRangeMin': _showTapping ? _tapMinController.text : null,
-      'stepVoltage': _showTapping ? _stepVoltageController.text : null,
-      'hvVoltage': _hvVoltageController.text,
-      'lvVoltage': _lvVoltageController.text,
-      if (_hasDualOutput) 'lv2Voltage': _lv2VoltageController.text,
-      'jobType': _selectedJobType,
-      'material': _selectedMaterial ?? 'Copper',
-      'remark': _remarkController.text,
-      'quantity': _quantityController.text,
-      'entryDateTime': DateTime.now().toIso8601String(),
-      'createdBy': username,
-    };
+      final serial = await ApiService.saveJob(data);
+      _pendingJob = null;
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Job $serial saved successfully')));
 
-    await ApiService.saveJob(data);
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Job saved successfully')));
-
-    // Navigate to JobListScreen
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const JobListScreen()),
-    );
+      // Navigate to JobListScreen
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const JobListScreen()),
+      );
+    } catch (error) {
+      if (error is ApiException && error.statusCode < 500) _pendingJob = null;
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Could not save job: $error')));
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
   Widget _buildField(
@@ -164,6 +179,7 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
       width: MediaQuery.of(context).size.width / 2 - 24,
       child: TextFormField(
         controller: controller,
+        enabled: !_isSaving && _pendingJob == null,
         decoration: InputDecoration(
           labelText: label,
           isDense: true,
@@ -192,6 +208,7 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
       width: MediaQuery.of(context).size.width / 2 - 24,
       child: TextFormField(
         controller: _vectorGroupController,
+        enabled: !_isSaving && _pendingJob == null,
         onChanged: (_) => setState(() {}),
         decoration: InputDecoration(
           labelText: 'Vector Group',
@@ -257,7 +274,7 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
                       ? selectedValue
                       : null), // no default for non-material
             isExpanded: true,
-            onChanged: onChanged,
+            onChanged: _isSaving || _pendingJob != null ? null : onChanged,
             items: options
                 .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                 .toList(),
@@ -351,7 +368,7 @@ class _JobDetailsScreenState extends State<JobDetailsScreen> {
                 _buildField(_remarkController, 'Remark'),
                 const SizedBox(height: 12),
                 ElevatedButton(
-                  onPressed: _submitForm,
+                  onPressed: _isSaving ? null : _submitForm,
                   child: const Text('Save Job'),
                 ),
               ],

@@ -5,6 +5,16 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+class ApiException implements Exception {
+  final int statusCode;
+  final String message;
+  ApiException(this.statusCode, this.message);
+  @override
+  String toString() => message;
+}
 
 class OutgoingIssueRejected implements Exception {
   final String message;
@@ -14,6 +24,7 @@ class OutgoingIssueRejected implements Exception {
 }
 
 class ApiService {
+  static final sessionExpired = ValueNotifier<bool>(false);
   //static const String lanUrl = 'http://192.168.2.205:5000';
   static const String lanUrl = 'http://192.168.2.205:5005';
   static const String versionUrl = 'http://192.168.2.205:8000/version.json';
@@ -27,7 +38,21 @@ class ApiService {
     Uri uri = Uri.parse(
       '$lanUrl$endpoint',
     ).replace(queryParameters: queryParams);
-    return await _send(method, uri, body);
+    final response = await _send(
+      method,
+      uri,
+      body,
+    ).timeout(const Duration(seconds: 20));
+    if (response.statusCode >= 200 && response.statusCode < 300)
+      return response;
+    if (endpoint == '/users/login' && response.statusCode == 401)
+      return response;
+    if (response.statusCode == 401) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('accessToken');
+      sessionExpired.value = true;
+    }
+    throw ApiException(response.statusCode, _extractError(response));
   }
 
   static Future<http.Response> _send(
@@ -35,25 +60,29 @@ class ApiService {
     Uri uri,
     Map<String, dynamic>? body,
   ) async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('accessToken');
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      if (token != null) 'Authorization': 'Bearer $token',
+    };
     switch (method) {
       case 'GET':
-        return await http.get(uri);
+        return await http.get(uri, headers: headers);
       case 'POST':
-        return await http.post(
-          uri,
-          headers: _headers(),
-          body: jsonEncode(body),
-        );
+        return await http.post(uri, headers: headers, body: jsonEncode(body));
       case 'PUT':
-        return await http.put(uri, headers: _headers(), body: jsonEncode(body));
+        return await http.put(uri, headers: headers, body: jsonEncode(body));
       case 'DELETE':
-        return await http.delete(uri);
+        return await http.delete(
+          uri,
+          headers: headers,
+          body: body == null ? null : jsonEncode(body),
+        );
       default:
         throw Exception('Unsupported method');
     }
   }
-
-  static Map<String, String> _headers() => {'Content-Type': 'application/json'};
 
   static Future<Map<String, dynamic>?> login(
     String username,
@@ -64,7 +93,13 @@ class ApiService {
       '/users/login',
       body: {'username': username, 'password': password},
     );
-    return res.statusCode == 200 ? jsonDecode(res.body) : null;
+    if (res.statusCode != 200) return null;
+    final user = Map<String, dynamic>.from(jsonDecode(res.body) as Map);
+    final prefs = await SharedPreferences.getInstance();
+    if (user['token'] is String)
+      await prefs.setString('accessToken', user['token']);
+    sessionExpired.value = false;
+    return user;
   }
 
   static Future<Map<String, dynamic>?> fetchVersionInfo() async {
@@ -117,14 +152,19 @@ class ApiService {
   }
 
   static Future<void> saveReport(Map<String, dynamic> data) async {
+    data['_requestId'] ??= const Uuid().v4();
     await _sendRequest('POST', '/reports', body: {'data': data});
   }
 
   static Future<bool> deleteReport(Map<String, dynamic> data) async {
     final res = await _sendRequest(
-      'POST',
-      '/reports/delete',
-      body: {'savedBy': data['savedBy'], 'timestamp': data['timestamp']},
+      'DELETE',
+      '/reports',
+      body: {
+        'savedBy': data['savedBy'],
+        'timestamp': data['timestamp'],
+        if (data['_requestId'] != null) '_requestId': data['_requestId'],
+      },
     );
     return res.statusCode == 200;
   }
@@ -134,12 +174,23 @@ class ApiService {
     return jsonDecode(res.body);
   }
 
-  static Future<void> saveJob(Map<String, dynamic> job) async {
-    await _sendRequest('POST', '/jobs', body: job);
+  static Future<String> saveJob(Map<String, dynamic> job) async {
+    job['_requestId'] ??= const Uuid().v4();
+    final response = await _sendRequest(
+      'POST',
+      '/jobs',
+      body: {
+        ...job,
+        '_autoNumber': job['jobType'] == 'New' || job['jobType'] == 'Repair',
+      },
+    );
+    return (jsonDecode(response.body)['serialNo'] ?? job['serialNo'])
+        .toString();
   }
 
-  static Future<void> updateJob(Map<String, dynamic> job) async =>
-      await saveJob(job);
+  static Future<void> updateJob(Map<String, dynamic> job) async {
+    await _sendRequest('PUT', '/jobs', body: job);
+  }
 
   static Future<List<Map<String, dynamic>>> getJobs() async {
     final res = await _sendRequest('GET', '/jobs');
@@ -179,13 +230,13 @@ class ApiService {
   }
 
   static Future<bool> saveOutgoingMaterial(Map<String, dynamic> data) async {
-    final res = await _sendRequest(
-      'POST',
-      '/outgoing_materials/issue',
-      body: data,
-    );
-    if (res.statusCode != 200) {
-      throw OutgoingIssueRejected(_extractError(res));
+    try {
+      await _sendRequest('POST', '/outgoing_materials/issue', body: data);
+    } on ApiException catch (error) {
+      if (error.statusCode >= 400 && error.statusCode < 500) {
+        throw OutgoingIssueRejected(error.message);
+      }
+      rethrow;
     }
     return true;
   }
@@ -248,27 +299,35 @@ class ApiService {
     required double price,
     required bool editFlag,
   }) async {
-    final res = await _sendRequest(
-      'POST',
-      '/stock/update',
-      body: {
-        'data': data,
-        'quantity': quantity,
-        'editFlag': editFlag,
-        'price': price,
-      },
-    );
-    if (res.statusCode == 200) {
-      return true;
-    } else {
-      try {
-        final responseBody = jsonDecode(res.body);
-        final errorMessage =
-            responseBody['error'] ?? responseBody['message'] ?? 'Unknown error';
-        return errorMessage;
-      } catch (_) {
-        return 'Error: ${res.statusCode}';
+    try {
+      final res = await _sendRequest(
+        'POST',
+        '/stock/update',
+        body: {
+          'data': data,
+          'quantity': quantity,
+          'editFlag': editFlag,
+          'price': price,
+          'expectedQuantity': data['quantity'],
+          'expectedPrice': data['price'],
+        },
+      );
+      if (res.statusCode == 200) {
+        return true;
+      } else {
+        try {
+          final responseBody = jsonDecode(res.body);
+          final errorMessage =
+              responseBody['error'] ??
+              responseBody['message'] ??
+              'Unknown error';
+          return errorMessage;
+        } catch (_) {
+          return 'Error: ${res.statusCode}';
+        }
       }
+    } catch (error) {
+      return error.toString();
     }
   }
 
@@ -412,16 +471,11 @@ class ApiService {
   }
 
   static Future<String> issueMaterial(Map<String, dynamic> data) async {
-    final jobIndentResult = await updateJobIndent(data: data);
-
-    if (jobIndentResult != 'Success') {
-      return 'Job Indent Failed: $jobIndentResult';
-    }
     try {
-      await updateStock(data: data, reduce: true);
+      await saveOutgoingMaterial(data);
       return 'Success';
     } catch (e) {
-      return 'Error updating stock: $e';
+      return 'Error issuing material: $e';
     }
   }
 

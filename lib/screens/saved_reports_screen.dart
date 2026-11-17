@@ -189,7 +189,16 @@ class _SavedReportsScreenState extends State<SavedReportsScreen> {
 
     if (confirm != true) return;
 
-    final retVal = await ApiService.deleteReport(report);
+    bool retVal;
+    try {
+      retVal = await ApiService.deleteReport(report);
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not delete report: $error')),
+        );
+      return;
+    }
 
     if (!mounted) return;
 

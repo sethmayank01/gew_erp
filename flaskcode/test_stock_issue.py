@@ -7,6 +7,7 @@ import psycopg2
 from psycopg2.extras import Json
 import app
 from stock_issue import IssueError, issue_material
+from test_support import authenticated_client
 
 
 class StockIssueTests(unittest.TestCase):
@@ -39,6 +40,56 @@ class StockIssueTests(unittest.TestCase):
         with self.conn.cursor() as cur:
             cur.execute("SELECT id, (data->>'quantity')::numeric FROM stock ORDER BY id")
             return dict(cur.fetchall())
+
+    def set_lot(self, stock_id, **fields):
+        with self.conn, self.conn.cursor() as cur:
+            cur.execute('UPDATE stock SET data = data || %s WHERE id = %s',
+                        (Json(fields), stock_id))
+
+    def test_fifo_split_uses_oldest_batch_and_its_own_price(self):
+        self.set_lot('lot-a', entryDate='2026-10-01T03:45:00Z', price=220)
+        self.set_lot('lot-b', entryDate='2026-10-01T09:00:00', price=100)
+        request = {**self.request, 'issuedQty': 1.5, 'details': [
+            {'id': 'lot-a', 'consumedQty': .5},
+            {'id': 'lot-b', 'consumedQty': 1},
+        ]}
+        with self.conn:
+            result = issue_material(self.conn, request)
+        self.assertEqual([(lot['id'], lot['consumedQty'], lot['consumedPrice'])
+                          for lot in result['details']],
+                         [('lot-b', 1, 100), ('lot-a', .5, 220)])
+        self.assertEqual(result['issuedValue'], 210)
+        self.assertEqual(result['weightedAvgPrice'], 140)
+        with self.conn:
+            self.assertEqual(issue_material(self.conn, request), result)
+        self.assertEqual(self.quantities(), {'lot-a': .5, 'lot-b': 0})
+
+    def test_newer_first_rejected_without_deduction_when_older_lot_exists(self):
+        self.set_lot('lot-a', entryDate='2026-10-02')
+        self.set_lot('lot-b', entryDate='2026-10-01')
+        with self.assertRaisesRegex(IssueError, 'oldest first'):
+            with self.conn:
+                issue_material(self.conn, self.request)
+        self.assertEqual(self.quantities(), {'lot-a': 1, 'lot-b': 1})
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM outgoing_materials")
+            self.assertEqual(cur.fetchone()[0], 0)
+            cur.execute("SELECT data->>'issuedQty' FROM job_indents")
+            self.assertEqual(float(cur.fetchone()[0]), 0)
+
+    def test_job_specific_fifo_excludes_other_jobs_and_prefers_dated_lots(self):
+        self.set_lot('lot-a', entryDate='invalid', jobSpecific=True, serialNo='TEST-JOB')
+        self.set_lot('lot-b', entryDate='2026-10-02', jobSpecific=True, serialNo='TEST-JOB')
+        with self.conn, self.conn.cursor() as cur:
+            cur.execute('INSERT INTO stock VALUES (%s, %s, %s)', (
+                'other-job', 'OLTC - EO16 - OTHER', Json({
+                    'type': 'OLTC', 'subtype': 'EO16', 'quantity': 2,
+                    'price': 1, 'jobSpecific': True, 'serialNo': 'OTHER',
+                    'entryDate': '2026-10-01'})))
+        with self.conn:
+            issue_material(self.conn, {**self.request, 'jobSpecific': True,
+                'details': [{'id': 'lot-b', 'consumedQty': 1}]})
+        self.assertEqual(self.quantities(), {'lot-a': 1, 'lot-b': 0, 'other-job': 2})
 
     def test_same_invoice_deducts_only_selected_row_and_retry_is_idempotent(self):
         with self.conn:
@@ -74,7 +125,7 @@ class StockIssueTests(unittest.TestCase):
                                                'details': details})
         self.assertEqual(self.quantities(), {'lot-a': 1, 'lot-b': 1})
 
-    def test_old_build_uses_primary_ids_and_only_one_lot_is_updated(self):
+    def test_old_build_reads_primary_ids_but_legacy_deductions_are_blocked(self):
         # Closing is owned by tearDown while Flask owns each transaction.
         class ConnectionProxy:
             def __init__(self, conn):
@@ -88,16 +139,16 @@ class StockIssueTests(unittest.TestCase):
             def close(self):
                 pass
         with patch.object(app, 'get_db_connection', return_value=ConnectionProxy(self.conn)):
-            client = app.app.test_client()
+            client = authenticated_client(app.app)
             stocks = client.get('/stock?isJobSpecific=false').get_json()
             self.assertEqual({s['id'] for s in stocks}, {'lot-a', 'lot-b'})
             response = client.post('/stock/update', json={'data': stocks[0], 'quantity': 1,
                                                          'price': 0, 'editFlag': False})
-            self.assertEqual(response.status_code, 200, response.get_json())
-            self.assertEqual(sum(self.quantities().values()), 1)
+            self.assertEqual(response.status_code, 410, response.get_json())
+            self.assertEqual(sum(self.quantities().values()), 2)
             response = client.post('/stock/update', json={'data': stocks[0], 'quantity': 1,
                                                          'price': 0, 'editFlag': False})
-            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.status_code, 410)
 
 
 if __name__ == '__main__':

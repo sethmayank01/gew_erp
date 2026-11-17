@@ -36,6 +36,7 @@ class _MaterialListScreenState extends State<MaterialListScreen> {
 
   // NEW: Loading and error state
   bool _isLoading = false;
+  bool _isSaving = false;
   String? _error;
 
   @override
@@ -84,31 +85,51 @@ class _MaterialListScreenState extends State<MaterialListScreen> {
   }
 
   Future<void> _addMaterial() async {
+    if (_isSaving) return;
     if (!_formKey.currentState!.validate()) return;
+    setState(() => _isSaving = true);
+    try {
+      final data = {
+        'type': _nameController.text,
+        'subtype': _subtypeController.text,
+        'unit': _selectedUnit,
+        'category': _selectedCategory,
+        'minQty': _minQtyController.text.isEmpty
+            ? null
+            : _minQtyController.text,
+        'jobSpecific': _isJobSpecific,
+      };
 
-    final data = {
-      'type': _nameController.text,
-      'subtype': _subtypeController.text,
-      'unit': _selectedUnit,
-      'category': _selectedCategory,
-      'minQty': _minQtyController.text.isEmpty ? null : _minQtyController.text,
-      'jobSpecific': _isJobSpecific,
-    };
-
-    await ApiService.addMaterial(data);
-    _nameController.clear();
-    _subtypeController.clear();
-    _minQtyController.clear();
-    setState(() {
-      _selectedUnit = null;
-      _selectedCategory = null;
-    });
-    _loadMaterials();
+      await ApiService.addMaterial(data);
+      if (!mounted) return;
+      _nameController.clear();
+      _subtypeController.clear();
+      _minQtyController.clear();
+      setState(() {
+        _selectedUnit = null;
+        _selectedCategory = null;
+      });
+      await _loadMaterials();
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save material: $error')),
+        );
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
   Future<void> _deleteMaterial(String type, String subtype) async {
-    await ApiService.deleteMaterial(type, subtype);
-    _loadMaterials();
+    try {
+      await ApiService.deleteMaterial(type, subtype);
+      await _loadMaterials();
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not delete material: $error')),
+        );
+    }
   }
 
   void _filterMaterials(String query) {
@@ -286,7 +307,7 @@ class _MaterialListScreenState extends State<MaterialListScreen> {
                     ),
                     const SizedBox(height: 12),
                     ElevatedButton(
-                      onPressed: _addMaterial,
+                      onPressed: _isSaving ? null : _addMaterial,
                       child: const Text('Add Material'),
                     ),
                   ],

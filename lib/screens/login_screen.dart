@@ -23,10 +23,21 @@ class _LoginScreenState extends State<LoginScreen> {
       _error = null;
     });
 
-    final token = await ApiService.login(
-      _usernameController.text.trim(),
-      _passwordController.text.trim(),
-    );
+    Map<String, dynamic>? token;
+    try {
+      token = await ApiService.login(
+        _usernameController.text.trim(),
+        _passwordController.text,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _error = error.toString();
+      });
+      return;
+    }
+    if (!mounted) return;
 
     setState(() => _isLoading = false);
 

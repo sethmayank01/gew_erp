@@ -1,0 +1,12 @@
+{
+  "android": {
+    "version": "1.2.10",
+    "apk_url": "http://192.168.2.205:8000/releases/1.2.10/app-release.apk"
+  },
+  "windows": {
+    "version": "1.2.10",
+    "installer_url": "http://192.168.2.205:8000/releases/1.2.10/gewerp_setup.exe"
+  },
+  "interval_seconds": 300,
+  "changelog": "Stock and indent transaction safeguards, authenticated requests, retry protection, test-report fixes, and outgoing selection/loading fixes. Please update and log in again."
+}

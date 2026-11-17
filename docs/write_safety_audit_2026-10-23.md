@@ -8,10 +8,38 @@ certification that every execution path is defect-free.
 
 No production records were changed during this audit. Database inspection was
 read-only; write reproductions used connection-local temporary tables through
-Flask's local test client. None of the findings below has been fixed in production
-as part of this audit.
+Flask's local test client. The subsequent approved 24 October release deployed
+the remediations without rewriting production database rows; details follow.
 
-## Highest-Priority Findings
+## Source Remediation Update - 24 October 2026
+
+The findings below describe the original 23 October implementation. They are
+retained as the audit record, not a statement that those defects remain in the
+current workspace. The following remediations now pass regression tests:
+
+- Stable incoming IDs, retained retry payloads, and single-flight submission.
+- Backend job-number allocation, create-only insertion, and revision-checked edits.
+- Atomic indent quantity/outstanding-demand edits with issued-quantity protection.
+- Atomic receipt/stock deletion with ownership, approval, and issuance checks.
+- Signed, expiring login credentials and server-side administrator permissions.
+- Disabled legacy split issuance and bulk stock replacement endpoints.
+- Central HTTP error propagation and visible write failures in the client.
+- Serialized catalog creation and corrected report deletion/retry contracts.
+- Compare-and-set stock edits reject stale balances and prices.
+- Outgoing job/material loads and searches discard stale responses; quantities
+  reset immediately, issuance waits for a successful current load, and failed
+  reads have explicit retry controls. NaN/infinite issue quantities are rejected.
+
+Verification: 33 backend tests and 92 Flutter application tests pass. The Flutter
+count excludes hidden suite-loading events. Database regression tests use
+connection-local temporary tables, not production rows. These tests do not
+constitute an exhaustive review of every application path.
+
+Release 1.2.10+10 was built and published, and the updated backend is running.
+See `docs/release_1.2.10.md` for the final deployment outcome and rollback notes.
+The seven historical duplicate candidates listed below have not been removed.
+
+## Original Highest-Priority Findings
 
 ### 1. P1: Incoming submissions can create duplicate stock on retry
 
@@ -203,38 +231,19 @@ TRFD0712 row has issuance history. No repair of these rows was attempted.
 
 ## Verification and Deployment
 
-- Eight executable safety reproductions were added in
-  `flaskcode/test_write_audit.py`. They are marked `expectedFailure` because the
-  existing implementation violates those safety assertions. An expected failure is
-  evidence of an unresolved defect, not a production fix.
-- The complete Python suite has 12 passing stock/indent regression tests and eight
-  expected failures for the confirmed audit defects. It uses temporary tables only.
-- Full Flutter tests were run. The first run exposed fixture type errors in the
-  previously added below/above-rated-current tests. Those fixtures were corrected
-  without changing calculation implementation. The repeat run finished with 75
-  passing application tests and three failing older smoke tests. The machine log
-  additionally reports 13 successful hidden suite-loading steps; those are not
-  counted as application tests.
-- Three older smoke tests have independent problems: the outgoing screen test lacks
-  HTTP mocks and looks for the wrong submit text; the report-input test lacks HTTP
-  mocks; and `test/widget_test.dart` still expects Flutter's sample counter app.
-  They should be replaced with realistic application tests, not silently skipped.
-- The new atomic outgoing path and one-receipt approval retry handling already have
-  safeguards. The indent single-flight/backend duplicate guard added earlier also
-  passed its focused tests.
-- Read-only inspection of `C:\Users\Admin\flask_backend\app.py` shows the running
-  service file still contains the old unconditional indent insertion route. The new
-  `indent_submission.py` guard is present only in the workspace until deployed.
-  Updating Flutter source alone does not update the Windows service or existing
-  installed clients.
+The original expected-failure reproductions are now ordinary passing regression
+tests. Older smoke tests have real HTTP fixtures and application expectations;
+none were skipped to obtain a passing suite. Added outgoing tests deliberately
+complete stock, indent, and search requests out of order and after disposal.
 
-## Recommended Order
+Updating Flutter source alone does not update the Windows service or installed
+clients. This release changes the API authentication contract, so deploy backend
+and both client packages together, publish the update manifest only after smoke
+checks pass, and require clients to update and log in again. Keep the service's
+signing key persistent across restarts. The deployment script backs up the previous
+backend and manifest and restores them if its checks fail.
 
-1. Deploy the already-tested indent creation guard and rebuild the client UI guard.
-2. Make incoming submission idempotent and receipt/stock deletion transactional.
-3. Protect job-number allocation and indent quantity edits.
-4. Add server-side authorization with a compatible client rollout.
-5. Retire unsafe legacy writes, standardize response handling, and fix catalog/report
-   contracts.
-6. Review the seven historical repeated indent pairs, taking backups and reconciling
-   outstanding demand before any authorized cleanup.
+Historical duplicate cleanup remains separate: review each candidate's issuance
+history and intended demand, back up affected records, and reconcile outstanding
+demand before removing any confirmed duplicate. Physical stock must not be changed
+simply because an unissued duplicate indent is removed.

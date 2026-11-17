@@ -300,200 +300,164 @@ class TestReportPdfGenerator {
         header: header,
         footer: footer,
         build: (context) => [
-          pw.Stack(
-            children: [
-              // Your content
-              pw.Column(
-                children: [
-                  _section(
-                    '1. Insulation Resistance Test',
-                    pw.Table(
-                      columnWidths: {
-                        0: const pw.FlexColumnWidth(3),
-                        1: const pw.FlexColumnWidth(2),
-                      },
-                      border: pw.TableBorder.all(
-                        color: PdfColors.grey600,
-                        width: 0.5,
+          _section(
+            '1. Insulation Resistance Test',
+            pw.Table(
+              columnWidths: {
+                0: const pw.FlexColumnWidth(3),
+                1: const pw.FlexColumnWidth(2),
+              },
+              border: pw.TableBorder.all(color: PdfColors.grey600, width: 0.5),
+              children: [
+                pw.TableRow(
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.symmetric(
+                        vertical: 2,
+                        horizontal: 4,
                       ),
-                      children: [
-                        pw.TableRow(
-                          children: [
-                            pw.Padding(
-                              padding: const pw.EdgeInsets.symmetric(
-                                vertical: 2,
-                                horizontal: 4,
-                              ),
-                              child: pw.Text(
-                                'Temperature',
-                                style: baseTextStyle,
-                              ),
-                            ),
-                            pw.Padding(
-                              padding: const pw.EdgeInsets.symmetric(
-                                vertical: 2,
-                                horizontal: 4,
-                              ),
-                              child: pw.Text(
-                                '${data['testData']['temperature']}°C',
-                                style: baseTextStyle,
-                              ),
-                            ),
-                          ],
-                        ),
-                        pw.TableRow(
-                          children: [
-                            pw.Padding(
-                              padding: const pw.EdgeInsets.symmetric(
-                                vertical: 2,
-                                horizontal: 4,
-                              ),
-                              child: pw.Text('HV-E', style: baseTextStyle),
-                            ),
-                            pw.Padding(
-                              padding: const pw.EdgeInsets.symmetric(
-                                vertical: 2,
-                                horizontal: 4,
-                              ),
-                              child: pw.Text(
-                                '${data['testData']['insulationResistance']['hv-e']} MΩ',
-                                style: baseTextStyle,
-                              ),
-                            ),
-                          ],
-                        ),
-                        pw.TableRow(
-                          children: [
-                            pw.Padding(
-                              padding: const pw.EdgeInsets.symmetric(
-                                vertical: 2,
-                                horizontal: 4,
-                              ),
-                              child: pw.Text('LV-E', style: baseTextStyle),
-                            ),
-                            pw.Padding(
-                              padding: const pw.EdgeInsets.symmetric(
-                                vertical: 2,
-                                horizontal: 4,
-                              ),
-                              child: pw.Text(
-                                '${data['testData']['insulationResistance']['lv-e']} MΩ',
-                                style: baseTextStyle,
-                              ),
-                            ),
-                          ],
-                        ),
-                        pw.TableRow(
-                          children: [
-                            pw.Padding(
-                              padding: const pw.EdgeInsets.symmetric(
-                                vertical: 2,
-                                horizontal: 4,
-                              ),
-                              child: pw.Text('HV-LV', style: baseTextStyle),
-                            ),
-                            pw.Padding(
-                              padding: const pw.EdgeInsets.symmetric(
-                                vertical: 2,
-                                horizontal: 4,
-                              ),
-                              child: pw.Text(
-                                '${data['testData']['insulationResistance']['hv-lv']} MΩ',
-                                style: baseTextStyle,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                      child: pw.Text('Temperature', style: baseTextStyle),
                     ),
-                  ),
-                  _section(
-                    vectorConfig.hasDualOutput
-                        ? '2. Ratio Test'
-                        : '2. ${vectorConfig.outputRatioLabel(0)}',
-                    vectorConfig.hasDualOutput
-                        ? pw.Column(
-                            crossAxisAlignment: pw.CrossAxisAlignment.start,
-                            children: [
-                              pw.Text(
-                                vectorConfig.outputRatioLabel(0),
-                                style: boldStyle,
-                              ),
-                              _buildRatioTable(
-                                tapStepsSno,
-                                tapSteps,
-                                hv,
-                                lv,
-                                ratioData,
-                                vectorGroup,
-                                0,
-                              ),
-                              pw.SizedBox(height: 6),
-                              pw.Text(
-                                vectorConfig.outputRatioLabel(1),
-                                style: boldStyle,
-                              ),
-                              _buildRatioTable(
-                                tapStepsSno,
-                                tapSteps,
-                                hv,
-                                lv2,
-                                ratioDataLv2,
-                                vectorGroup,
-                                1,
-                              ),
-                            ],
-                          )
-                        : _buildRatioTable(
-                            tapStepsSno,
-                            tapSteps,
-                            hv,
-                            lv,
-                            ratioData,
-                            vectorGroup,
-                            0,
-                          ),
-                  ),
-                  _section(
-                    '3. Measurement of Winding Resistance',
-                    pw.Column(
-                      children: [
-                        pw.Row(
-                          children: [
-                            pw.Expanded(
-                              child: _buildResistance(
-                                'HV Winding',
-                                'in ${TransformerLosses.resistanceUnit(data, 'hv')}',
-                                data['testData']['windingResistance']['hv'],
-                                hvResistance,
-                              ),
-                            ),
-                            pw.SizedBox(width: 8),
-                            pw.Expanded(
-                              child: _buildResistance(
-                                vectorConfig.outputWindingLabel(0),
-                                'in ${TransformerLosses.resistanceUnit(data, 'lv')}',
-                                data['testData']['windingResistance']['lv'],
-                                lvResistance,
-                              ),
-                            ),
-                          ],
-                        ),
-                        if (vectorConfig.hasDualOutput) ...[
-                          pw.SizedBox(height: 6),
-                          _buildResistance(
-                            vectorConfig.outputWindingLabel(1),
-                            'in ${TransformerLosses.resistanceUnit(data, 'lv2')}',
-                            data['testData']['windingResistance']['lv2'] ?? {},
-                            lv2Resistance!,
-                          ),
-                        ],
-                      ],
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.symmetric(
+                        vertical: 2,
+                        horizontal: 4,
+                      ),
+                      child: pw.Text(
+                        '${data['testData']['temperature']}°C',
+                        style: baseTextStyle,
+                      ),
                     ),
+                  ],
+                ),
+                pw.TableRow(
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.symmetric(
+                        vertical: 2,
+                        horizontal: 4,
+                      ),
+                      child: pw.Text('HV-E', style: baseTextStyle),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.symmetric(
+                        vertical: 2,
+                        horizontal: 4,
+                      ),
+                      child: pw.Text(
+                        '${data['testData']['insulationResistance']['hv-e']} MΩ',
+                        style: baseTextStyle,
+                      ),
+                    ),
+                  ],
+                ),
+                pw.TableRow(
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.symmetric(
+                        vertical: 2,
+                        horizontal: 4,
+                      ),
+                      child: pw.Text('LV-E', style: baseTextStyle),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.symmetric(
+                        vertical: 2,
+                        horizontal: 4,
+                      ),
+                      child: pw.Text(
+                        '${data['testData']['insulationResistance']['lv-e']} MΩ',
+                        style: baseTextStyle,
+                      ),
+                    ),
+                  ],
+                ),
+                pw.TableRow(
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.symmetric(
+                        vertical: 2,
+                        horizontal: 4,
+                      ),
+                      child: pw.Text('HV-LV', style: baseTextStyle),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.symmetric(
+                        vertical: 2,
+                        horizontal: 4,
+                      ),
+                      child: pw.Text(
+                        '${data['testData']['insulationResistance']['hv-lv']} MΩ',
+                        style: baseTextStyle,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          // Ratio tables must be direct MultiPage children to span pages.
+          for (
+            var output = 0;
+            output < (vectorConfig.hasDualOutput ? 2 : 1);
+            output++
+          ) ...[
+            pw.NewPage(freeSpace: 80),
+            pw.Padding(
+              padding: const pw.EdgeInsets.only(top: 8, bottom: 4),
+              child: pw.Text(
+                output == 0
+                    ? '2. ${vectorConfig.outputRatioLabel(output)}'
+                    : vectorConfig.outputRatioLabel(output),
+                style: boldStyle,
+              ),
+            ),
+            _buildRatioTable(
+              tapStepsSno,
+              tapSteps,
+              hv,
+              output == 0 ? lv : lv2,
+              output == 0 ? ratioData : ratioDataLv2,
+              vectorGroup,
+              output,
+            ),
+          ],
+          _section(
+            '3. Measurement of Winding Resistance',
+            pw.Column(
+              children: [
+                pw.Row(
+                  children: [
+                    pw.Expanded(
+                      child: _buildResistance(
+                        'HV Winding',
+                        'in ${TransformerLosses.resistanceUnit(data, 'hv')}',
+                        data['testData']['windingResistance']['hv'],
+                        hvResistance,
+                      ),
+                    ),
+                    pw.SizedBox(width: 8),
+                    pw.Expanded(
+                      child: _buildResistance(
+                        vectorConfig.outputWindingLabel(0),
+                        'in ${TransformerLosses.resistanceUnit(data, 'lv')}',
+                        data['testData']['windingResistance']['lv'],
+                        lvResistance,
+                      ),
+                    ),
+                  ],
+                ),
+                if (vectorConfig.hasDualOutput) ...[
+                  pw.SizedBox(height: 6),
+                  _buildResistance(
+                    vectorConfig.outputWindingLabel(1),
+                    'in ${TransformerLosses.resistanceUnit(data, 'lv2')}',
+                    data['testData']['windingResistance']['lv2'] ?? {},
+                    lv2Resistance!,
                   ),
                 ],
-              ),
-            ],
+              ],
+            ),
           ),
           pw.Stack(
             children: [
@@ -1088,6 +1052,8 @@ class TestReportPreviewScreen extends StatefulWidget {
 
 class _TestReportPreviewScreenState extends State<TestReportPreviewScreen> {
   bool _isPreview = true;
+  bool _isDownloading = false;
+  Map<String, dynamic>? _pendingDownloadReport;
   Future<Uint8List>? _pdfBytes;
 
   Future<Uint8List> _documentBytes() =>
@@ -1125,12 +1091,14 @@ class _TestReportPreviewScreenState extends State<TestReportPreviewScreen> {
               const Text('Preview'),
               Switch(
                 value: _isPreview,
-                onChanged: (val) {
-                  setState(() {
-                    _isPreview = val;
-                    _pdfBytes = null;
-                  });
-                },
+                onChanged: _isDownloading || _pendingDownloadReport != null
+                    ? null
+                    : (val) {
+                        setState(() {
+                          _isPreview = val;
+                          _pdfBytes = null;
+                        });
+                      },
               ),
             ],
           ),
@@ -1154,34 +1122,48 @@ class _TestReportPreviewScreenState extends State<TestReportPreviewScreen> {
             child: ElevatedButton.icon(
               icon: const Icon(Icons.save_alt),
               label: const Text('Save PDF to Downloads'),
-              onPressed: () async {
-                try {
-                  final bytes = await _documentBytes();
+              onPressed: _isDownloading
+                  ? null
+                  : () async {
+                      if (_isDownloading) return;
+                      setState(() => _isDownloading = true);
+                      try {
+                        final bytes = await _documentBytes();
 
-                  final dir = await getDownloadDirectory();
-                  final fileName =
-                      'TestReport_${widget.data['serialNo'] ?? 'Report'}.pdf';
-                  final file = File('${dir.path}/$fileName');
-                  await file.writeAsBytes(bytes);
-                  final Map<String, dynamic> reportToSave = {...widget.data};
-                  reportToSave['timestamp'] = DateTime.now().toIso8601String();
-                  reportToSave['remark'] =
-                      reportToSave['remark'] + " - Downloaded";
-                  await ApiService.saveReport(reportToSave);
+                        final dir = await getDownloadDirectory();
+                        final fileName =
+                            'TestReport_${widget.data['serialNo'] ?? 'Report'}.pdf';
+                        final file = File('${dir.path}/$fileName');
+                        await file.writeAsBytes(bytes);
+                        final reportToSave = _pendingDownloadReport ??= {
+                          ...widget.data,
+                          'isPreview': _isPreview,
+                          'timestamp': DateTime.now().toIso8601String(),
+                          'remark':
+                              '${widget.data['remark'] ?? ''} - Downloaded',
+                        };
+                        await ApiService.saveReport(reportToSave);
+                        _pendingDownloadReport = null;
+                        if (!mounted) return;
 
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        'PDF saved to ${file.path} and report stored.',
-                      ),
-                    ),
-                  );
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error saving PDF: $e')),
-                  );
-                }
-              },
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'PDF saved to ${file.path} and report stored.',
+                            ),
+                          ),
+                        );
+                      } catch (e) {
+                        if (e is ApiException && e.statusCode < 500)
+                          _pendingDownloadReport = null;
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Error saving PDF: $e')),
+                        );
+                      } finally {
+                        if (mounted) setState(() => _isDownloading = false);
+                      }
+                    },
             ),
           ),
         ],

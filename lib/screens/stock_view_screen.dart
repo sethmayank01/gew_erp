@@ -224,14 +224,22 @@ class _StockViewScreenState extends State<StockViewScreen> {
     Map<String, dynamic> entry,
     bool isJobStock,
   ) async {
-    await ApiService.removeStock(data: entry);
-    setState(() {
-      if (isJobStock) {
-        _jobStock.remove(entry);
-      } else {
-        _generalStock.remove(entry);
-      }
-    });
+    try {
+      final removed = await ApiService.removeStock(data: entry);
+      if (!removed || !mounted) return;
+      setState(() {
+        if (isJobStock) {
+          _jobStock.remove(entry);
+        } else {
+          _generalStock.remove(entry);
+        }
+      });
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not delete stock: $error')),
+        );
+    }
   }
 
   Future<void> _editStockEntry(
@@ -275,11 +283,8 @@ class _StockViewScreenState extends State<StockViewScreen> {
             onPressed: () async {
               final newQty = double.tryParse(qtyController.text) ?? 0.0;
               final newPrice = double.tryParse(priceController.text) ?? 0.0;
-              Map<String, dynamic> updatedEntry = Map.of(entry);
-              updatedEntry['quantity'] = newQty;
-              updatedEntry['price'] = newPrice;
               final result = await ApiService.updateStockQuantity(
-                data: updatedEntry,
+                data: entry,
                 quantity: newQty,
                 price: newPrice,
                 editFlag: true,

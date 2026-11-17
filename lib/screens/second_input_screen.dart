@@ -23,6 +23,8 @@ class SecondInputScreen extends StatefulWidget {
 
 class _SecondInputScreenState extends State<SecondInputScreen> {
   final _formKey = GlobalKey<FormState>();
+  bool _isSavingReport = false;
+  Map<String, dynamic>? _pendingReport;
 
   final _temperatureController = TextEditingController();
   final _hvEController = TextEditingController();
@@ -309,25 +311,40 @@ class _SecondInputScreenState extends State<SecondInputScreen> {
   }
 
   Future<void> _saveReport() async {
+    if (_isSavingReport) return;
     if (!_formKey.currentState!.validate()) return;
 
     final testData = _buildTestData();
     if (!_validateIndividualTests(testData)) return;
-    final prefs = await SharedPreferences.getInstance();
-    final username = prefs.getString('username') ?? 'Unknown';
-    final fullData = {
-      ...widget.generalData,
-      'testData': testData,
-      'savedBy': username,
-      'remark': _remarkController.text,
-      'timestamp': DateTime.now().toIso8601String(),
-    };
+    setState(() => _isSavingReport = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final username = prefs.getString('username') ?? 'Unknown';
+      final fullData = _pendingReport ??= {
+        ...widget.generalData,
+        'testData': testData,
+        'savedBy': username,
+        'remark': _remarkController.text,
+        'timestamp': DateTime.now().toIso8601String(),
+      };
 
-    await ApiService.saveReport(fullData);
+      await ApiService.saveReport(fullData);
+      _pendingReport = null;
+      if (!mounted) return;
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('Report saved successfully.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Report saved successfully.')));
+    } catch (error) {
+      if (error is ApiException && error.statusCode < 500)
+        _pendingReport = null;
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save report: $error')),
+        );
+    } finally {
+      if (mounted) setState(() => _isSavingReport = false);
+    }
   }
 
   void _submitForm(bool isPreview) async {
@@ -647,7 +664,7 @@ class _SecondInputScreenState extends State<SecondInputScreen> {
                         child: const Text('Preview Report'),
                       ),
                       ElevatedButton(
-                        onPressed: _saveReport,
+                        onPressed: _isSavingReport ? null : _saveReport,
                         child: const Text('Save Report'),
                       ),
                     ],

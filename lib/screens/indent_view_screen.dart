@@ -96,6 +96,7 @@ class _IndentViewScreenState extends State<IndentViewScreen> {
     });
     try {
       final indents = await ApiService.getIndentsForJob(jobId);
+      if (!mounted || _selectedJob?['serialNo'] != jobId) return;
       setState(() {
         _indents = List<Map<String, dynamic>>.from(indents).map((indent) {
           return {...indent, 'category': _getCategoryForIndent(indent)};
@@ -103,6 +104,7 @@ class _IndentViewScreenState extends State<IndentViewScreen> {
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted || _selectedJob?['serialNo'] != jobId) return;
       setState(() => _isLoading = false);
       ScaffoldMessenger.of(
         context,
@@ -480,6 +482,12 @@ class _IndentViewScreenState extends State<IndentViewScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final totalPrice = _calculateTotalPrice();
+    final jobQuantity = double.tryParse(
+      _selectedJob?['quantity']?.toString() ?? '',
+    );
+    final hasMultipleUnits =
+        jobQuantity != null && jobQuantity.isFinite && jobQuantity > 1;
     final isMobile = MediaQuery.of(context).size.width < 600;
     final isDesktop =
         Platform.isWindows || Platform.isLinux || Platform.isMacOS;
@@ -532,7 +540,10 @@ class _IndentViewScreenState extends State<IndentViewScreen> {
                       ),
                     ),
                     onChanged: (job) {
-                      setState(() => _selectedJob = job);
+                      setState(() {
+                        _selectedJob = job;
+                        _indents = [];
+                      });
                       if (job != null) _loadIndentsForJob(job['serialNo']);
                     },
                   ),
@@ -540,12 +551,26 @@ class _IndentViewScreenState extends State<IndentViewScreen> {
                   if (_indents.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Text(
-                        "Final Total Price: ₹${_calculateTotalPrice().toStringAsFixed(2)}",
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
+                      child: Wrap(
+                        spacing: 24,
+                        runSpacing: 6,
+                        children: [
+                          Text(
+                            "Final Total Price: ₹${totalPrice.toStringAsFixed(2)}",
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                            ),
+                          ),
+                          if (hasMultipleUnits)
+                            Text(
+                              'Cost per Unit (${jobQuantity.toInt() == jobQuantity ? jobQuantity.toInt() : jobQuantity} nos): ₹${(totalPrice / jobQuantity).toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18,
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   if (_selectedJob != null && _indents.isNotEmpty && isDesktop)

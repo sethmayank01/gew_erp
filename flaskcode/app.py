@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 import psycopg2
 import psycopg2.extras
@@ -8,12 +8,51 @@ import json
 import uuid
 import os
 import sys
+import secrets
 from datetime import datetime, timezone
 from stock_issue import IssueError, issue_material, update_stock_lot
 from indent_submission import IndentSubmissionError, submit_indents
+from authentication import AuthenticationError, issue_token, verify_token
+import write_safety
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = os.environ.get('GEW_ERP_SECRET_KEY') or secrets.token_hex(32)
 CORS(app)
+
+
+@app.before_request
+def authenticate_request():
+    if request.method == 'OPTIONS' or request.endpoint in (None, 'login', 'health'):
+        return None
+    try:
+        g.user = verify_token(app.config['SECRET_KEY'], request.headers.get('Authorization'))
+    except AuthenticationError as error:
+        return jsonify({'error': str(error)}), 401
+    admin_endpoints = {
+        'add_user', 'reset_password', 'delete_user', 'get_users',
+        'add_material', 'delete_material', 'approve_material_entry',
+        'update_existing_job_indent', 'update_job_record', 'update_stock',
+        'delete_stock_entry', 'add_stock', 'save_stock',
+    }
+    if request.endpoint in admin_endpoints and g.user['role'] != 'admin':
+        return jsonify({'error': 'Administrator access is required'}), 403
+
+
+def _write_transaction(action, *args, status=200):
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn:
+            result = action(conn, *args)
+        return jsonify(result), status
+    except write_safety.WriteError as error:
+        return jsonify({'error': str(error)}), error.status
+    except Exception:
+        app.logger.exception('Database write failed')
+        return jsonify({'error': 'Database write failed; refresh or retry the same operation'}), 500
+    finally:
+        if conn is not None:
+            conn.close()
 
 # ============================================================
 # DATABASE CONNECTION SETUP
@@ -96,9 +135,13 @@ def parse_float(value, default=0.0):
 @app.route('/users/login', methods=['POST'])
 def login():
 
-    data = request.json
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'Login data must be a JSON object'}), 400
     username = data.get('username')
     password = data.get('password')
+    if not isinstance(username, str) or not isinstance(password, str) or not username or not password:
+        return jsonify({'error': 'Username and password are required'}), 400
 
     conn = get_db_connection()
     cur = conn.cursor(
@@ -129,6 +172,7 @@ def login():
 
         user_dict = dict(user)
         user_dict.pop('password')
+        user_dict['token'] = issue_token(app.config['SECRET_KEY'], user['username'], user['role'])
 
         return jsonify(user_dict)
 
@@ -330,43 +374,7 @@ def get_users():
 
 @app.route('/reports', methods=['POST'])
 def save_report():
-
-    data = request.json.get('data')
-
-    if not data:
-        return jsonify({
-            'error': 'Missing report data'
-        }), 400
-
-    try:
-
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        cur.execute(
-            '''
-            INSERT INTO reports (data)
-            VALUES (%s)
-            ''',
-            (
-                jsonb(data),
-            )
-        )
-
-        conn.commit()
-
-        cur.close()
-        conn.close()
-
-        return jsonify({
-            'message': 'Report saved'
-        }), 201
-
-    except Exception as e:
-
-        return jsonify({
-            'error': str(e)
-        }), 500
+    return _write_transaction(write_safety.save_report, request.get_json(silent=True), g.user, status=201)
 
 
 @app.route('/reports', methods=['GET'])
@@ -393,64 +401,9 @@ def get_reports():
 
 
 @app.route('/reports', methods=['DELETE'])
+@app.route('/reports/delete', methods=['POST'])
 def delete_report():
-
-    data = request.get_json(silent=True)
-
-    if not data:
-        return jsonify({
-            'error': 'Missing data'
-        }), 400
-
-    saved_by = data.get('savedBy')
-    timestamp = data.get('timestamp')
-
-    if not saved_by or not timestamp:
-        return jsonify({
-            'error': 'Missing savedBy or timestamp'
-        }), 400
-
-    try:
-
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        cur.execute(
-            '''
-            DELETE FROM reports
-            WHERE data->>'savedBy' = %s
-              AND data->>'timestamp' = %s
-            ''',
-            (
-                saved_by,
-                timestamp
-            )
-        )
-
-        deleted_count = cur.rowcount
-
-        conn.commit()
-
-        cur.close()
-        conn.close()
-
-        if deleted_count > 0:
-
-            return jsonify({
-                'message': 'Report deleted'
-            }), 200
-
-        else:
-
-            return jsonify({
-                'message': 'Report not found'
-            }), 404
-
-    except Exception as e:
-
-        return jsonify({
-            'error': str(e)
-        }), 500
+    return _write_transaction(write_safety.delete_report, request.get_json(silent=True), g.user)
 
 
 # ============================================================
@@ -459,56 +412,7 @@ def delete_report():
 
 @app.route('/jobs', methods=['POST'])
 def save_job():
-
-    job = request.json
-
-    if not job:
-        return jsonify({
-            'error': 'Missing job data'
-        }), 400
-
-    serialNo = job.get('serialNo')
-
-    if not serialNo:
-        return jsonify({
-            'error': 'serialNo is required'
-        }), 401
-
-    try:
-
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        cur.execute(
-            '''
-            INSERT INTO jobs
-                (serial_no, data)
-            VALUES
-                (%s, %s)
-            ON CONFLICT (serial_no)
-            DO UPDATE SET
-                data = EXCLUDED.data
-            ''',
-            (
-                serialNo,
-                jsonb(job)
-            )
-        )
-
-        conn.commit()
-
-        cur.close()
-        conn.close()
-
-        return jsonify({
-            'message': 'Job saved/updated'
-        }), 201
-
-    except Exception as e:
-
-        return jsonify({
-            'error': str(e)
-        }), 500
+    return _write_transaction(write_safety.create_job, request.get_json(silent=True), g.user, status=201)
 
 
 @app.route('/jobs', methods=['GET'])
@@ -532,6 +436,11 @@ def get_jobs():
     ]
 
     return jsonify(jobs)
+
+
+@app.route('/jobs', methods=['PUT'])
+def update_job_record():
+    return _write_transaction(write_safety.update_job, request.get_json(silent=True))
 
 
 @app.route('/jobs/open', methods=['GET'])
@@ -569,62 +478,7 @@ def get_open_jobs():
 
 @app.route('/materials', methods=['POST'])
 def add_material():
-
-    data = request.json
-
-    if not data:
-        return jsonify({
-            'error': 'Missing material data'
-        }), 400
-
-    material_id = str(uuid.uuid4())
-
-    m_type = data.get('type')
-    subtype = data.get('subtype')
-
-    if not m_type or not subtype:
-        return jsonify({
-            'error': 'type and subtype are required'
-        }), 400
-
-    try:
-
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        cur.execute(
-            '''
-            INSERT INTO materials
-                (id, type, subtype, data)
-            VALUES
-                (%s, %s, %s, %s)
-            ON CONFLICT (id)
-            DO UPDATE SET
-                data = EXCLUDED.data
-            ''',
-            (
-                material_id,
-                m_type,
-                subtype,
-                jsonb(data)
-            )
-        )
-
-        conn.commit()
-
-        cur.close()
-        conn.close()
-
-        return jsonify({
-            'message': 'Material added/updated',
-            'id': material_id
-        }), 201
-
-    except Exception as e:
-
-        return jsonify({
-            'error': str(e)
-        }), 500
+    return _write_transaction(write_safety.save_material, request.get_json(silent=True), status=201)
 
 
 @app.route('/materials', methods=['GET'])
@@ -711,60 +565,14 @@ def delete_material():
 
 @app.route('/incoming_materials', methods=['POST'])
 def submit_material_incoming():
-
-    data = request.json
-
-    if not data:
-        return jsonify({
-            'error': 'Missing incoming material data'
-        }), 400
-
-    incoming_id = str(uuid.uuid4())
-
-    data['approved'] = False
-    data['approved_by'] = None
-    data['approved_at'] = None
-
-    try:
-
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        cur.execute(
-            '''
-            INSERT INTO incoming_materials
-                (id, data)
-            VALUES
-                (%s, %s)
-            ''',
-            (
-                incoming_id,
-                jsonb(data)
-            )
-        )
-
-        conn.commit()
-
-        cur.close()
-        conn.close()
-
-        return jsonify({
-            'message': 'Incoming material submitted',
-            'id': incoming_id
-        }), 201
-
-    except Exception as e:
-
-        return jsonify({
-            'error': str(e)
-        }), 500
+    return _write_transaction(write_safety.create_receipt, request.get_json(silent=True), g.user, status=201)
 
 
 @app.route('/incoming_materials/<entry_id>/approve', methods=['POST'])
 def approve_material_entry(entry_id):
 
     data = request.json or {}
-    approver = data.get('approver')
+    approver = g.user['username']
 
     if not approver:
         return jsonify({
@@ -799,6 +607,10 @@ def approve_material_entry(entry_id):
             }), 404
 
         entry = parse_json_data(row[0])
+
+        write_safety.identity(entry)
+        write_safety.number(entry.get('quantity'), 'quantity', positive=True)
+        write_safety.number(entry.get('price'), 'price')
 
         # ---------------------------------------------------------
         # 2. Check whether already approved
@@ -862,7 +674,7 @@ def approve_material_entry(entry_id):
         #
         # IMPORTANT:
         # Do NOT update an existing stock row.
-        # Every incoming lot remains a separate row for LIFO.
+        # Every incoming lot remains a separate row for FIFO.
         # ---------------------------------------------------------
         cur.execute(
             '''
@@ -885,6 +697,10 @@ def approve_material_entry(entry_id):
             'message': 'Entry approved and added to stock'
         }), 200
 
+    except write_safety.WriteError as error:
+        if conn:
+            conn.rollback()
+        return jsonify({'error': str(error)}), error.status
     except Exception as e:
 
         if conn:
@@ -938,43 +754,7 @@ def get_material_incoming_entries():
 
 @app.route('/incoming_materials/<entry_id>', methods=['DELETE'])
 def delete_material_entry(entry_id):
-
-    try:
-
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        cur.execute(
-            '''
-            DELETE FROM incoming_materials
-            WHERE id = %s
-            ''',
-            (entry_id,)
-        )
-
-        if cur.rowcount == 0:
-
-            cur.close()
-            conn.close()
-
-            return jsonify({
-                'error': 'Entry not found'
-            }), 404
-
-        conn.commit()
-
-        cur.close()
-        conn.close()
-
-        return jsonify({
-            'message': 'Entry deleted'
-        }), 200
-
-    except Exception as e:
-
-        return jsonify({
-            'error': str(e)
-        }), 500
+    return _write_transaction(write_safety.delete_receipt, entry_id, g.user)
 
 
 @app.route('/incoming_materials/<entry_id>', methods=['GET'])
@@ -1010,91 +790,7 @@ def get_material_entry_by_id(entry_id):
 
 @app.route('/incoming_materials/<entry_id>', methods=['PUT'])
 def update_material_incoming_entry(entry_id):
-
-    """
-    Update a material incoming entry before approval.
-    Only allowed if not approved.
-    """
-
-    data = request.json
-
-    if not data:
-        return jsonify({
-            'error': 'Missing updated data'
-        }), 400
-
-    try:
-
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        cur.execute(
-            '''
-            SELECT data
-            FROM incoming_materials
-            WHERE id = %s
-            ''',
-            (entry_id,)
-        )
-
-        row = cur.fetchone()
-
-        if not row:
-
-            cur.close()
-            conn.close()
-
-            return jsonify({
-                'error': 'Entry not found'
-            }), 404
-
-        entry = parse_json_data(row[0])
-
-        if entry.get('approved', False):
-
-            cur.close()
-            conn.close()
-
-            return jsonify({
-                'error': 'Cannot edit an approved entry'
-            }), 400
-
-        for key, value in data.items():
-
-            if key not in [
-                'id',
-                'approved',
-                'approved_by',
-                'approved_at'
-            ]:
-                entry[key] = value
-
-        cur.execute(
-            '''
-            UPDATE incoming_materials
-            SET data = %s
-            WHERE id = %s
-            ''',
-            (
-                jsonb(entry),
-                entry_id
-            )
-        )
-
-        conn.commit()
-
-        cur.close()
-        conn.close()
-
-        return jsonify({
-            'message': 'Entry updated'
-        }), 200
-
-    except Exception as e:
-
-        return jsonify({
-            'error': str(e)
-        }), 500
+    return _write_transaction(write_safety.edit_receipt, entry_id, request.get_json(silent=True), g.user)
 
 
 # ============================================================
@@ -1108,6 +804,7 @@ def issue_outgoing_material():
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify({'error': 'Missing outgoing material data'}), 400
+        data['user_out'] = g.user['username']
         conn = get_db_connection()
         with conn:
             result = issue_material(conn, data)
@@ -1123,49 +820,7 @@ def issue_outgoing_material():
 
 @app.route('/outgoing_materials', methods=['POST'])
 def submit_material_outgoing():
-
-    data = request.json
-
-    if not data:
-        return jsonify({
-            'error': 'Missing outgoing material data'
-        }), 400
-
-    outgoing_id = str(uuid.uuid4())
-
-    try:
-
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        cur.execute(
-            '''
-            INSERT INTO outgoing_materials
-                (id, data)
-            VALUES
-                (%s, %s)
-            ''',
-            (
-                outgoing_id,
-                jsonb(data)
-            )
-        )
-
-        conn.commit()
-
-        cur.close()
-        conn.close()
-
-        return jsonify({
-            'message': 'Outgoing material submitted',
-            'id': outgoing_id
-        }), 200
-
-    except Exception as e:
-
-        return jsonify({
-            'error': str(e)
-        }), 500
+    return jsonify({'error': 'This legacy write is disabled; update the application and use the atomic workflow'}), 410
 
 
 @app.route('/outgoing_materials', methods=['GET'])
@@ -1241,182 +896,13 @@ def get_material_outgoing_entries():
 
 @app.route('/stock/add', methods=['POST'])
 def add_stock():
-
-    data = request.json.get('data')
-
-    if not data:
-        return jsonify({
-            'error': 'Missing stock data'
-        }), 400
-
-    # Older clients called this endpoint for incoming entries as well as the
-    # approval endpoint. Incoming stock must only be created by approval.
-    if 'approved' in data:
-        return jsonify({
-            'error': 'Incoming stock is created by the approval endpoint'
-        }), 409
-
-    stock_id = str(uuid.uuid4())
-
-    job_specific = data.get(
-        'jobSpecific',
-        False
-    )
-
-    serial_no = data.get(
-        'serialNo',
-        None
-    )
-
-    m_type = data.get(
-        'type',
-        None
-    )
-
-    subtype = data.get(
-        'subtype',
-        None
-    )
-
-    material = f"{m_type} - {subtype}"
-
-    key = material
-
-    print(
-        "key %s, job_specific %s ",
-        key,
-        job_specific
-    )
-
-    if job_specific and serial_no:
-
-        key = f"{material} - {serial_no}"
-
-    try:
-
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        print(
-            "add_stock() INSERT INTO stock "
-            "(id,key,data) VALUES (%s,%s,%s)",
-            (
-                stock_id,
-                key,
-                data
-            )
-        )
-
-        cur.execute(
-            '''
-            INSERT INTO stock
-                (id, key, data)
-            VALUES
-                (%s, %s, %s)
-            ''',
-            (
-                stock_id,
-                key,
-                jsonb(data)
-            )
-        )
-
-        conn.commit()
-
-        cur.close()
-        conn.close()
-
-        return jsonify({
-            'message': 'Stock Added'
-        }), 200
-
-    except Exception as e:
-
-        print(
-            "Exception: %s",
-            str(e)
-        )
-
-        return jsonify({
-            'error': str(e)
-        }), 500
+    return jsonify({'error': 'This legacy write is disabled; update the application and use the atomic workflow'}), 410
 
 
 @app.route('/stock/delete', methods=['POST'])
 def delete_stock_entry():
-
-    try:
-
-        payload = request.json.get('data')
-
-        if not payload:
-            return jsonify({
-                'error': 'Missing stock data'
-            }), 400
-
-        print(
-            "Payload: %s",
-            payload
-        )
-
-        stock_id = payload.get('id')
-
-        if not stock_id:
-
-            return jsonify({
-                'error': 'Missing stock id'
-            }), 400
-
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        cur.execute(
-            '''
-            DELETE FROM stock
-            WHERE id = %s
-            ''',
-            (stock_id,)
-        )
-
-        deleted_count = cur.rowcount
-
-        # Before stock IDs were tied to incoming IDs, the only stable source
-        # identity stored in both records was the exact entry timestamp.
-        if deleted_count == 0 and payload.get('entryDate'):
-            cur.execute(
-                '''
-                DELETE FROM stock
-                WHERE data->>'entryDate' = %s
-                ''',
-                (payload.get('entryDate'),)
-            )
-            deleted_count = cur.rowcount
-
-        if deleted_count == 0:
-            conn.rollback()
-            conn.close()
-            return jsonify({
-                'error': 'No matching record found'
-            }), 404
-
-        conn.commit()
-
-        conn.close()
-
-        return jsonify({
-            'message': 'Entry deleted successfully'
-        }), 200
-
-    except Exception as e:
-
-        print(
-            "Exception: %s",
-            str(e)
-        )
-
-        return jsonify({
-            'error': str(e)
-        }), 500
+    payload = request.get_json(silent=True) or {}
+    return _write_transaction(write_safety.delete_stock, payload.get('data'))
 
 
 @app.route('/stock/update', methods=['POST'])
@@ -1426,6 +912,8 @@ def update_stock():
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             return jsonify({'error': 'Missing stock data'}), 400
+        if payload.get('editFlag') is not True:
+            return jsonify({'error': 'Legacy stock deductions are disabled; use atomic material issuance'}), 410
         conn = get_db_connection()
         with conn:
             update_stock_lot(conn, payload)
@@ -1522,78 +1010,7 @@ def get_stock():
 
 @app.route('/stock/save', methods=['POST'])
 def save_stock():
-
-    stock_data = request.json.get(
-        'stockData'
-    )
-
-    is_job_specific = request.json.get(
-        'isJobSpecific',
-        False
-    )
-
-    if (
-        not stock_data
-        or not isinstance(stock_data, list)
-    ):
-
-        return jsonify({
-            'error': 'stockData must be a list'
-        }), 400
-
-    try:
-
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        for item in stock_data:
-
-            m_type = item.get('type')
-            subtype = item.get('subtype')
-            serial_no = item.get(
-                'serialNo',
-                None
-            )
-
-            if not m_type or not subtype:
-                continue
-
-            key = f"{m_type} - {subtype}"
-
-            if is_job_specific and serial_no:
-
-                key = f"{key} - {serial_no}"
-
-            cur.execute(
-                '''
-                INSERT INTO stock
-                    (key, data)
-                VALUES
-                    (%s, %s)
-                ON CONFLICT (key)
-                DO UPDATE SET
-                    data = EXCLUDED.data
-                ''',
-                (
-                    key,
-                    jsonb(item)
-                )
-            )
-
-        conn.commit()
-
-        cur.close()
-        conn.close()
-
-        return jsonify({
-            'message': 'Stock saved'
-        }), 200
-
-    except Exception as e:
-
-        return jsonify({
-            'error': str(e)
-        }), 500
+    return jsonify({'error': 'This legacy write is disabled; update the application and use the atomic workflow'}), 410
 
 
 # ============================================================
@@ -1604,6 +1021,8 @@ def save_stock():
 def submit_job_indent():
     payload = request.get_json(silent=True)
     data = payload.get('data') if isinstance(payload, dict) else None
+    if isinstance(data, list):
+        data = [{**item, 'user_ind': g.user['username']} if isinstance(item, dict) else item for item in data]
     conn = None
     try:
         conn = get_db_connection()
@@ -1650,169 +1069,7 @@ def get_indents_for_job(jobid):
 
 @app.route('/job_indents', methods=['PUT'])
 def update_job_indent():
-
-    data = request.json
-
-    if not data:
-
-        return jsonify({
-            'error': 'Missing indent data'
-        }), 400
-
-    jobid = data.get(
-        'serialNo'
-    )
-
-    item_type = data.get(
-        'type'
-    )
-
-    item_subtype = data.get(
-        'subtype'
-    )
-
-    if not jobid:
-
-        return jsonify({
-            'error': 'serialNo is required'
-        }), 401
-
-    if not item_type or not item_subtype:
-
-        return jsonify({
-            'error': 'type and subtype are required'
-        }), 402
-
-    try:
-
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        # JSONB operators directly.
-        # No data::json conversion required.
-
-        cur.execute(
-            '''
-            SELECT *
-            FROM job_indents
-            WHERE jobid = %s
-              AND data->>'type' = %s
-              AND data->>'subtype' = %s
-            ''',
-            (
-                jobid,
-                item_type,
-                item_subtype
-            )
-        )
-
-        row = cur.fetchone()
-
-        if not row:
-
-            return jsonify({
-                'error':
-                'Indent with matching jobid, '
-                'type, and subtype not found'
-            }), 400
-
-        indent_id = row[0]
-
-        matched_indent = parse_json_data(
-            row[2]
-        )
-
-        old_issued_qty = float(
-            matched_indent.get(
-                'issuedQty'
-            ) or 0
-        )
-
-        old_issued_value = float(
-            matched_indent.get(
-                'issuedValue'
-            ) or 0
-        )
-
-        new_issued_qty = float(
-            data.get(
-                'issuedQty'
-            ) or 0
-        )
-
-        new_issued_value = float(
-            data.get(
-                'issuedValue'
-            ) or 0
-        )
-
-        total_issued_qty = (
-            old_issued_qty
-            +
-            new_issued_qty
-        )
-
-        total_issued_value = (
-            old_issued_value
-            +
-            new_issued_value
-        )
-
-        matched_indent['price'] = data.get(
-            'price'
-        )
-
-        matched_indent['issuedQty'] = (
-            total_issued_qty
-        )
-
-        matched_indent['issuedValue'] = (
-            total_issued_value
-        )
-
-        matched_indent['jobSpecific'] = data.get(
-            'jobSpecific'
-        )
-
-        matched_indent['user_out'] = data.get(
-            'user_out'
-        )
-
-        matched_indent['out_time'] = data.get(
-            'out_time'
-        )
-
-        cur.execute(
-            '''
-            UPDATE job_indents
-            SET data = %s
-            WHERE id = %s
-            ''',
-            (
-                jsonb(matched_indent),
-                indent_id
-            )
-        )
-
-        conn.commit()
-
-        cur.close()
-        conn.close()
-
-        return jsonify({
-            'message': 'Job indent updated'
-        }), 200
-
-    except Exception as e:
-
-        print(
-            "Exception:",
-            str(e)
-        )
-
-        return jsonify({
-            'error': str(e)
-        }), 500
+    return jsonify({'error': 'This legacy write is disabled; update the application and use the atomic workflow'}), 410
 
 
 # ============================================================
@@ -1963,110 +1220,7 @@ def get_open_job_indents():
 
 @app.route('/job_indents/update_existing', methods=['POST'])
 def update_existing_job_indent():
-
-    data = request.json
-
-    if not data:
-
-        return jsonify({
-            'error': 'Missing indent data'
-        }), 400
-
-    jobid = data.get(
-        'serialNo'
-    )
-
-    item_type = data.get(
-        'type'
-    )
-
-    item_subtype = data.get(
-        'subtype'
-    )
-
-    if not jobid:
-
-        return jsonify({
-            'error': 'serialNo is required'
-        }), 401
-
-    if not item_type or not item_subtype:
-
-        return jsonify({
-            'error': 'type and subtype are required'
-        }), 402
-
-    try:
-
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        cur.execute(
-            '''
-            SELECT *
-            FROM job_indents
-            WHERE jobid = %s
-              AND data->>'type' = %s
-              AND data->>'subtype' = %s
-            ''',
-            (
-                jobid,
-                item_type,
-                item_subtype
-            )
-        )
-
-        row = cur.fetchone()
-
-        if not row:
-
-            return jsonify({
-                'error':
-                'Indent with matching jobid, '
-                'type, and subtype not found'
-            }), 400
-
-        indent_id = row[0]
-
-        matched_indent = parse_json_data(
-            row[2]
-        )
-
-        matched_indent['quantity'] = data.get(
-            'quantity'
-        )
-
-        cur.execute(
-            '''
-            UPDATE job_indents
-            SET data = %s
-            WHERE id = %s
-            ''',
-            (
-                jsonb(matched_indent),
-                indent_id
-            )
-        )
-
-        conn.commit()
-
-        cur.close()
-        conn.close()
-
-        return jsonify({
-            'message': 'Job indent updated'
-        }), 200
-
-    except Exception as e:
-
-        print(
-            "Exception: %s",
-            str(e)
-        )
-
-        return jsonify({
-            'error': str(e)
-        }), 500
+    return _write_transaction(write_safety.edit_indent, request.get_json(silent=True))
 
 
 # ============================================================
@@ -2077,7 +1231,8 @@ def update_existing_job_indent():
 def health():
 
     return jsonify({
-        'status': 'OK'
+        'status': 'OK',
+        'version': '1.2.10'
     })
 
 
@@ -2090,5 +1245,5 @@ if __name__ == '__main__':
     app.run(
         host='0.0.0.0',
         port=5005,
-        debug=True
+        debug=False
     )

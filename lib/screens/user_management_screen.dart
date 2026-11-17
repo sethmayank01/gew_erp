@@ -13,6 +13,28 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   List<Map<String, dynamic>> _users = [];
   String _currentUser = '';
   String _role = '';
+  bool _writing = false;
+
+  Future<void> _writeUser(
+    Future<void> Function() action, {
+    VoidCallback? onSuccess,
+  }) async {
+    if (_writing) return;
+    _writing = true;
+    try {
+      await action();
+      if (!mounted) return;
+      onSuccess?.call();
+      await _fetchUsers();
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('User update failed: $error')));
+    } finally {
+      _writing = false;
+    }
+  }
 
   @override
   void initState() {
@@ -31,6 +53,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
 
   Future<void> _fetchUsers() async {
     final users = await ApiService.getUsers();
+    if (!mounted) return;
     setState(() {
       _users = List<Map<String, dynamic>>.from(users);
     });
@@ -43,37 +66,47 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
 
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('Add New User'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
-                controller: usernameController,
-                decoration: const InputDecoration(labelText: 'Username')),
+              controller: usernameController,
+              decoration: const InputDecoration(labelText: 'Username'),
+            ),
             TextField(
-                controller: passwordController,
-                decoration: const InputDecoration(labelText: 'Password'),
-                obscureText: true),
+              controller: passwordController,
+              decoration: const InputDecoration(labelText: 'Password'),
+              obscureText: true,
+            ),
             DropdownButton<String>(
               value: role,
               onChanged: (val) => setState(() => role = val!),
-              items: ['user', 'admin']
-                  .map((r) => DropdownMenuItem(value: r, child: Text(r)))
-                  .toList(),
+              items: [
+                'user',
+                'admin',
+              ].map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
             ),
           ],
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             onPressed: () async {
-              await ApiService.addUser(
-                  usernameController.text, passwordController.text, role);
-              Navigator.pop(context);
-              _fetchUsers();
+              await _writeUser(
+                () => ApiService.addUser(
+                  usernameController.text,
+                  passwordController.text,
+                  role,
+                ),
+                onSuccess: () {
+                  if (dialogContext.mounted) Navigator.pop(dialogContext);
+                },
+              );
             },
             child: const Text('Add'),
           ),
@@ -87,20 +120,27 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
 
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: Text('Reset Password for $username'),
         content: TextField(
-            controller: passwordController,
-            decoration: const InputDecoration(labelText: 'New Password'),
-            obscureText: true),
+          controller: passwordController,
+          decoration: const InputDecoration(labelText: 'New Password'),
+          obscureText: true,
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             onPressed: () async {
-              await ApiService.resetPassword(username, passwordController.text);
-              Navigator.pop(context);
+              await _writeUser(
+                () =>
+                    ApiService.resetPassword(username, passwordController.text),
+                onSuccess: () {
+                  if (dialogContext.mounted) Navigator.pop(dialogContext);
+                },
+              );
             },
             child: const Text('Reset'),
           ),
@@ -110,8 +150,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   }
 
   Future<void> _deleteUser(String username) async {
-    await ApiService.deleteUser(username);
-    _fetchUsers();
+    await _writeUser(() => ApiService.deleteUser(username));
   }
 
   @override

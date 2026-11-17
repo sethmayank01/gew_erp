@@ -1,9 +1,30 @@
 import math
+from datetime import datetime, timedelta, timezone
 from psycopg2.extras import Json
 
 
 class IssueError(ValueError):
     pass
+
+
+_RECEIPT_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
+
+
+def _fifo_key(row):
+    stock_id, _, stock = row
+    try:
+        date = datetime.fromisoformat(str(stock.get('entryDate') or '').strip())
+        if date.tzinfo is None:
+            date = date.replace(tzinfo=_RECEIPT_TIMEZONE)
+        return (False, date, stock_id)
+    except ValueError:
+        return (True, datetime.max.replace(tzinfo=timezone.utc), stock_id)
+
+
+def _same_allocations(left, right):
+    return left.keys() == right.keys() and all(
+        math.isclose(take, right[stock_id], rel_tol=0, abs_tol=1e-8)
+        for stock_id, take in left.items())
 
 
 def update_stock_lot(conn, payload):
@@ -20,6 +41,13 @@ def update_stock_lot(conn, payload):
             raise IssueError('Stock row not found; refresh stock before issuing')
         key, stock = row
         available = float(stock.get('quantity') or 0)
+        if editing:
+            expected_quantity = float(payload.get('expectedQuantity'))
+            expected_price = float(payload.get('expectedPrice'))
+            if (not math.isfinite(expected_quantity) or not math.isfinite(expected_price)
+                    or not math.isclose(available, expected_quantity, abs_tol=1e-8)
+                    or not math.isclose(float(stock.get('price') or 0), expected_price, abs_tol=1e-8)):
+                raise IssueError('Stock changed since it was loaded; refresh before editing')
         if not editing and (not math.isfinite(available) or quantity > available):
             raise IssueError('Insufficient stock; refresh stock before issuing')
         stock['quantity'] = quantity if editing else available - quantity
@@ -53,7 +81,7 @@ def issue_material(conn, data):
         if not stock_id or stock_id in allocations or not math.isfinite(take) or take <= 0:
             raise IssueError('Allocations require unique stock row ids and positive quantities')
         allocations[stock_id] = take
-    if not allocations or not math.isclose(sum(allocations.values()), quantity, abs_tol=1e-8):
+    if not allocations or not math.isclose(sum(allocations.values()), quantity, rel_tol=0, abs_tol=1e-8):
         raise IssueError('Stock allocations must equal issued quantity')
     with conn.cursor() as cur:
         # Serialize retries even before the outgoing row exists.
@@ -64,7 +92,7 @@ def issue_material(conn, data):
             previous = row[0]
             keys = ('serialNo', 'type', 'subtype', 'jobSpecific', 'issuedQty')
             lots = {d['id']: float(d['consumedQty']) for d in previous['details']}
-            if any(previous.get(k) != data.get(k) for k in keys) or lots != allocations:
+            if any(previous.get(k) != data.get(k) for k in keys) or not _same_allocations(lots, allocations):
                 raise IssueError('Issue id already used for a different request')
             return previous
         cur.execute('''SELECT id, data FROM job_indents WHERE jobid = %s
@@ -76,30 +104,44 @@ def issue_material(conn, data):
         indent_id, indent = indents[0]
         if float(indent.get('issuedQty') or 0) + quantity > float(indent['quantity']) * 1.02 + 1e-8:
             raise IssueError('Issue exceeds remaining indent quantity with 2% tolerance')
-        cur.execute('SELECT id, key, data FROM stock WHERE id = ANY(%s) ORDER BY id FOR UPDATE',
-                    (list(allocations),))
-        rows = cur.fetchall()
-        if len(rows) != len(allocations):
-            raise IssueError('Stock row not found; refresh stock before issuing')
+        job_specific = data.get('jobSpecific', False) is True
+        # Lock matching lots in primary-key order, then allocate in receipt order.
+        cur.execute("""SELECT id, key, data FROM stock
+                       WHERE data->>'type' = %s AND data->>'subtype' = %s
+                         AND COALESCE(data->>'jobSpecific', 'false') = %s
+                         AND (NOT %s OR data->>'serialNo' = %s)
+                       ORDER BY id FOR UPDATE""",
+                    (data['type'], data['subtype'], str(job_specific).lower(),
+                     job_specific, data['serialNo']))
+        rows = sorted(cur.fetchall(), key=_fifo_key)
         consumed, value = [], 0.0
+        fifo, deductions = {}, []
+        remaining = quantity
         for stock_id, key, stock in rows:
-            job_specific = data.get('jobSpecific', False)
-            if (stock.get('type') != data['type'] or stock.get('subtype') != data['subtype']
-                    or stock.get('jobSpecific', False) != job_specific
-                    or (job_specific and stock.get('serialNo') != data['serialNo'])):
-                raise IssueError('Stock allocation does not match material and job')
-            take = allocations[stock_id]
-            available, price = float(stock.get('quantity') or 0), float(stock.get('price') or 0)
-            if not math.isfinite(available) or take > available:
-                raise IssueError('Insufficient stock; refresh stock before issuing')
+            if remaining <= 0:
+                break
+            available = float(stock.get('quantity') or 0)
+            if not math.isfinite(available):
+                raise IssueError('Invalid stock balance')
+            if available <= 0:
+                continue
+            take = min(remaining, available)
+            price = float(stock.get('price') or 0)
             if not math.isfinite(price) or price < 0:
                 raise IssueError('Invalid stock price')
+            fifo[stock_id] = take
+            deductions.append((stock_id, stock, available - take))
+            remaining -= take
             consumed.append({**stock, 'id': stock_id, 'key': key,
                              'consumedQty': take, 'consumedPrice': price})
             value += take * price
+        if remaining > 1e-8:
+            raise IssueError('Insufficient stock; refresh stock before issuing')
+        if not _same_allocations(fifo, allocations):
+            raise IssueError('Stock lots must be issued oldest first (FIFO); refresh and review the allocation')
         result = {**data, 'details': consumed, 'issuedValue': value, 'weightedAvgPrice': value / quantity}
-        for stock_id, key, stock in rows:
-            stock['quantity'] = float(stock.get('quantity') or 0) - allocations[stock_id]
+        for stock_id, stock, balance in deductions:
+            stock['quantity'] = balance
             cur.execute('UPDATE stock SET data = %s WHERE id = %s', (Json(stock), stock_id))
         key = f"{data['type']} - {data['subtype']}"
         if data.get('jobSpecific', False):

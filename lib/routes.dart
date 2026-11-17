@@ -14,9 +14,13 @@ import 'screens/stock_view_screen.dart';
 import 'screens/job_indent_consumption.dart';
 import 'screens/indent_view_screen.dart';
 import 'screens/material_outgoing_screen.dart';
+import 'services/api_service.dart';
 
 final GoRouter router = GoRouter(
   initialLocation: '/',
+  refreshListenable: ApiService.sessionExpired,
+  redirect: (context, state) =>
+      ApiService.sessionExpired.value && state.uri.path != '/' ? '/' : null,
   routes: [
     GoRoute(path: '/', builder: (_, __) => const LoginScreen()),
     GoRoute(path: '/dashboard', builder: (_, __) => const DashboardScreen()),
